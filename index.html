@@ -256,10 +256,16 @@ function applyFaceRig(riggedFace) {
   rigRotation('Head', riggedFace.head, 0.7, 0.4);
 
   // まばたき (Kalidokit: eye.l / eye.r は開き具合。1に近いほど開いている想定 → 閉じ量に変換)
-  const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
-  const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
-  setBlendShape('BlinkL', blinkL);
-  setBlendShape('BlinkR', blinkR);
+  const blinkLRaw = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
+  const blinkRRaw = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
+  // ノイズ対策1: なめらか化(指数移動平均)。数値を下げるほど滑らかだが反応も遅くなる
+  blinkLSmooth += (blinkLRaw - blinkLSmooth) * 0.2;
+  blinkRSmooth += (blinkRRaw - blinkRSmooth) * 0.2;
+  // ノイズ対策2: 不感帯。小さい揺れは0に丸めて「閉じてないのにピクつく」のを防ぐ
+  const blinkL = blinkLSmooth < 0.15 ? 0 : blinkLSmooth;
+  const blinkR = blinkRSmooth < 0.15 ? 0 : blinkRSmooth;
+  setBlendShape('BlinkL', blinkL, 1);
+  setBlendShape('BlinkR', blinkR, 1);
 
   // 口の形 (母音シェイプ)
   if (riggedFace.mouth && riggedFace.mouth.shape) {
