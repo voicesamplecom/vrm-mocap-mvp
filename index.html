@@ -241,8 +241,8 @@ function applyFaceRig(riggedFace) {
   // まばたき (Kalidokit: eye.l / eye.r は開き具合。1に近いほど開いている想定 → 閉じ量に変換)
   const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
   const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
-  setBlendShape('BLINK_L', blinkL);
-  setBlendShape('BLINK_R', blinkR);
+setBlendShape('BlinkL', blinkL);
+setBlendShape('BlinkR', blinkR);
 
   // 口の形 (母音シェイプ)
   if (riggedFace.mouth && riggedFace.mouth.shape) {
