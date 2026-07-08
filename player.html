@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRM モーションプレイヤー - 再生・補正スタジオ</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #16181d;
+    color: #e8e8e8;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    padding: 10px 16px;
+    background: #1e2128;
+    border-bottom: 1px solid #2c3038;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; color: #d3a98f; }
+  header p { font-size: 12px; margin: 4px 0 0; color: #8a8f98; }
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #viewport-wrap { position: relative; flex: 1; min-height: 0; background: #0c0d10; }
+  #canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #controls {
+    padding: 10px 12px;
+    background: #1e2128;
+    border-top: 1px solid #2c3038;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  button, label.file-btn {
+    background: #2c3038;
+    color: #e8e8e8;
+    border: 1px solid #3a3f4a;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:active, label.file-btn:active { background: #3a3f4a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.play { background: #1f5a3a; border-color: #2f8f5e; }
+  button.smooth { background: #4a3a6b; border-color: #7a5fae; }
+  input[type=file] { display: none; }
+  #status {
+    font-size: 11px;
+    color: #8a8f98;
+    padding: 4px 4px 0;
+    display: flex;
+    justify-content: space-between;
+  }
+  .smooth-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #b8a8d8;
+  }
+  .smooth-controls input[type=range] { width: 90px; }
+  #log {
+    height: 80px;
+    overflow-y: auto;
+    background: #0c0d10;
+    border-top: 1px solid #2c3038;
+    padding: 6px 12px;
+    font-family: "SF Mono", monospace;
+    font-size: 11px;
+    color: #d8b890;
+    line-height: 1.5;
+  }
+  #camhint {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.55);
+    font-size: 11px;
+    color: #ccc;
+    padding: 6px 10px;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VRM モーションプレイヤー</h1>
+  <p>保存したモーション(JSON)と音声を読み込み → ブレ補正 → カメラを動かしながら再生</p>
+</header>
+
+<main>
+  <div id="viewport-wrap">
+    <canvas id="canvas"></canvas>
+    <div id="camhint">1本指ドラッグ: 回転 / ピンチ: ズーム / 2本指ドラッグ: 移動</div>
+  </div>
+
+  <div id="status">
+    <span id="statusText">未初期化</span>
+    <span id="frameInfo">frames: 0</span>
+  </div>
+
+  <div id="controls">
+    <label class="file-btn">
+      VRM読み込み
+      <input type="file" id="vrmInput" accept=".vrm">
+    </label>
+    <label class="file-btn">
+      モーション読み込み
+      <input type="file" id="motionInput" accept=".json,application/json">
+    </label>
+    <label class="file-btn">
+      音声読み込み
+      <input type="file" id="audioInput" accept="audio/*,.webm,.mp4,.m4a">
+    </label>
+    <button id="btnSmooth" class="smooth" disabled>ブレ補正を適用</button>
+    <div class="smooth-controls">
+      強度 <input type="range" id="smoothStrength" min="1" max="7" step="2" value="3">
+      <span id="smoothLabel">3</span>
+    </div>
+    <button id="btnPlay" class="play" disabled>再生</button>
+    <button id="btnStop" disabled>停止</button>
+    <button id="btnResetCam">カメラリセット</button>
+  </div>
+
+  <div id="log"></div>
+</main>
+
+<!-- Three.js + OrbitControls + three-vrm -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+
+<script>
+const logEl = document.getElementById('log');
+const statusText = document.getElementById('statusText');
+const frameInfoEl = document.getElementById('frameInfo');
+
+function log(msg) {
+  const d = document.createElement('div');
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setStatus(s) { statusText.textContent = s; }
+
+// ---------- Three.js setup ----------
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+const scene = new THREE.Scene();
+const camera3d = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+
+const CAM_HOME = { pos: new THREE.Vector3(0, 1.4, 2.2), target: new THREE.Vector3(0, 1.3, 0) };
+camera3d.position.copy(CAM_HOME.pos);
+
+const controls = new THREE.OrbitControls(camera3d, canvas);
+controls.target.copy(CAM_HOME.target);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.update();
+
+const light = new THREE.DirectionalLight(0xffffff, 1.2);
+light.position.set(1, 1, 1);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+function resizeRenderer() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera3d.aspect = w / h;
+  camera3d.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+let currentVRM = null;
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  resizeRenderer();
+  controls.update();
+  const delta = clock.getDelta();
+  if (currentVRM) currentVRM.update(delta);
+  renderer.render(scene, camera3d);
+}
+animate();
+
+document.getElementById('btnResetCam').addEventListener('click', () => {
+  camera3d.position.copy(CAM_HOME.pos);
+  controls.target.copy(CAM_HOME.target);
+  controls.update();
+  log('カメラをリセットしました');
+});
+
+// ---------- VRM loading ----------
+const gltfLoader = new THREE.GLTFLoader();
+
+document.getElementById('vrmInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  log(`VRM読み込み中: ${file.name}`);
+  gltfLoader.load(url, (gltf) => {
+    THREE_VRM.VRM.from(gltf).then((vrm) => {
+      if (currentVRM) scene.remove(currentVRM.scene);
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      vrm.scene.rotation.y = Math.PI;
+      log('VRM読み込み完了');
+      updatePlayable();
+    }).catch(err => log(`VRM変換エラー: ${err.message}`));
+  }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
+});
+
+// ---------- Motion / audio loading ----------
+let frames = [];
+let audioEl = null;
+
+document.getElementById('motionInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      frames = JSON.parse(reader.result);
+      if (!Array.isArray(frames)) throw new Error('配列形式ではありません');
+      frameInfoEl.textContent = `frames: ${frames.length}`;
+      log(`モーション読み込み完了: ${frames.length}フレーム (${(file.size / 1024).toFixed(0)} KB)`);
+      document.getElementById('btnSmooth').disabled = frames.length < 5;
+      updatePlayable();
+    } catch (err) {
+      log(`モーション読み込みエラー: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('audioInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  audioEl = new Audio(URL.createObjectURL(file));
+  log(`音声読み込み完了: ${file.name}`);
+});
+
+function updatePlayable() {
+  document.getElementById('btnPlay').disabled = !(currentVRM && frames.length > 0);
+}
+
+// ---------- ブレ補正 (オフライン平滑化) ----------
+// 数値を持つ全プロパティを再帰的に辿り、移動平均をかける
+const smoothStrengthEl = document.getElementById('smoothStrength');
+const smoothLabelEl = document.getElementById('smoothLabel');
+smoothStrengthEl.addEventListener('input', () => { smoothLabelEl.textContent = smoothStrengthEl.value; });
+
+function collectNumericPaths(obj, prefix, paths) {
+  for (const key in obj) {
+    const val = obj[key];
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof val === 'number') paths.push(path);
+    else if (val && typeof val === 'object') collectNumericPaths(val, path, paths);
+  }
+}
+function getByPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setByPath(obj, path, value) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  const target = keys.reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  if (target != null) target[last] = value;
+}
+
+// 外れ値除去: 前後の値から大きく飛んだスパイクを前後平均に置き換える
+function despike(values, threshold = 0.8) {
+  const out = values.slice();
+  for (let i = 1; i < values.length - 1; i++) {
+    const prev = values[i - 1], cur = values[i], next = values[i + 1];
+    if (prev == null || cur == null || next == null) continue;
+    const jumpIn = Math.abs(cur - prev);
+    const jumpOut = Math.abs(next - cur);
+    const neighborDiff = Math.abs(next - prev);
+    // 行って戻る形のスパイク(前後は近いのに中央だけ飛んでいる)
+    if (jumpIn > threshold && jumpOut > threshold && neighborDiff < threshold) {
+      out[i] = (prev + next) / 2;
+    }
+  }
+  return out;
+}
+
+// 移動平均 (windowは奇数)
+function movingAverage(values, windowSize) {
+  const half = Math.floor(windowSize / 2);
+  const out = new Array(values.length);
+  for (let i = 0; i < values.length; i++) {
+    let sum = 0, count = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(values.length - 1, i + half); j++) {
+      if (values[j] == null) continue;
+      sum += values[j];
+      count++;
+    }
+    out[i] = count > 0 ? sum / count : values[i];
+  }
+  return out;
+}
+
+document.getElementById('btnSmooth').addEventListener('click', () => {
+  if (frames.length < 5) { log('フレーム数が少なすぎます'); return; }
+  const windowSize = parseInt(smoothStrengthEl.value, 10);
+  setStatus('ブレ補正 処理中...');
+  log(`ブレ補正開始 (強度=${windowSize}: 前後${Math.floor(windowSize/2)}フレームの平均)`);
+
+  // 対象パス一覧は「最初に有効な値を持つフレーム」から取得(部位ごとに)
+  const parts = ['face', 'pose', 'lh', 'rh'];
+  let totalPaths = 0;
+
+  for (const part of parts) {
+    const sample = frames.find(f => f && f[part]);
+    if (!sample) continue;
+    const paths = [];
+    collectNumericPaths(sample[part], '', paths);
+    totalPaths += paths.length;
+
+    for (const path of paths) {
+      // 時系列を抽出 (その部位が検出されなかったフレームはnull)
+      const series = frames.map(f => (f && f[part]) ? getByPath(f[part], path) : null);
+      const despiked = despike(series);
+      const smoothed = movingAverage(despiked, windowSize);
+      frames.forEach((f, i) => {
+        if (f && f[part] && smoothed[i] != null) setByPath(f[part], path, smoothed[i]);
+      });
+    }
+  }
+
+  setStatus('待機中');
+  log(`ブレ補正完了 (${totalPaths}系列を処理)。再生して確認してください。`);
+});
+
+// ---------- リグ適用 (収録側と同じロジック) ----------
+function rigRotation(name, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  const euler = new THREE.Euler(rotation.x * dampener, rotation.y * dampener, rotation.z * dampener, 'XYZ');
+  const quat = new THREE.Quaternion().setFromEuler(euler);
+  node.quaternion.slerp(quat, lerpAmount);
+}
+
+function rigPosition(name, position = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  const vector = new THREE.Vector3(position.x * dampener, position.y * dampener, position.z * dampener);
+  node.position.lerp(vector, lerpAmount);
+}
+
+function setBlendShape(presetName, value, lerpAmount = 0.4) {
+  if (!currentVRM || !currentVRM.blendShapeProxy) return;
+  const preset = THREE_VRM.VRMSchema.BlendShapePresetName[presetName];
+  if (preset === undefined) return;
+  const current = currentVRM.blendShapeProxy.getValue(preset) || 0;
+  const next = current + (value - current) * lerpAmount;
+  currentVRM.blendShapeProxy.setValue(preset, next);
+}
+
+function applyFaceRig(riggedFace) {
+  if (!currentVRM || !riggedFace) return;
+  rigRotation('Neck', { x: riggedFace.head.x * 0.5, y: riggedFace.head.y * 0.5, z: riggedFace.head.z * 0.5 }, 0.7, 0.4);
+  rigRotation('Head', riggedFace.head, 0.7, 0.4);
+  const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
+  const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
+  setBlendShape('BlinkL', blinkL < 0.15 ? 0 : blinkL, 1);
+  setBlendShape('BlinkR', blinkR < 0.15 ? 0 : blinkR, 1);
+  if (riggedFace.mouth && riggedFace.mouth.shape) {
+    setBlendShape('A', riggedFace.mouth.shape.A);
+    setBlendShape('I', riggedFace.mouth.shape.I);
+    setBlendShape('U', riggedFace.mouth.shape.U);
+    setBlendShape('E', riggedFace.mouth.shape.E);
+    setBlendShape('O', riggedFace.mouth.shape.O);
+  }
+}
+
+function applyPoseRig(riggedPose) {
+  if (!currentVRM || !riggedPose) return;
+  rigRotation('Hips', riggedPose.Hips.rotation, 0.7, 0.3);
+  rigPosition('Hips', {
+    x: riggedPose.Hips.position.x,
+    y: riggedPose.Hips.position.y + 1,
+    z: -riggedPose.Hips.position.z
+  }, 1, 0.07);
+  rigRotation('Chest', riggedPose.Spine, 0.25, 0.3);
+  rigRotation('Spine', riggedPose.Spine, 0.45, 0.3);
+  rigRotation('RightUpperArm', riggedPose.RightUpperArm, 1, 0.3);
+  rigRotation('RightLowerArm', riggedPose.RightLowerArm, 1, 0.3);
+  rigRotation('LeftUpperArm', riggedPose.LeftUpperArm, 1, 0.3);
+  rigRotation('LeftLowerArm', riggedPose.LeftLowerArm, 1, 0.3);
+  rigRotation('LeftUpperLeg', riggedPose.LeftUpperLeg, 1, 0.3);
+  rigRotation('LeftLowerLeg', riggedPose.LeftLowerLeg, 1, 0.3);
+  rigRotation('RightUpperLeg', riggedPose.RightUpperLeg, 1, 0.3);
+  rigRotation('RightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
+}
+
+function clampRotation(rotation, maxRad) {
+  return {
+    x: Math.max(-maxRad, Math.min(maxRad, rotation.x)),
+    y: Math.max(-maxRad, Math.min(maxRad, rotation.y)),
+    z: Math.max(-maxRad, Math.min(maxRad, rotation.z))
+  };
+}
+
+function applyHandRig(riggedHand, side) {
+  if (!currentVRM || !riggedHand) return;
+  for (const key in riggedHand) {
+    const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
+    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
+    rigRotation(boneKey, clampRotation(riggedHand[key], maxRad), 1, 0.3);
+  }
+}
+
+// ---------- Playback ----------
+let playbackActive = false;
+
+document.getElementById('btnPlay').addEventListener('click', () => {
+  if (!frames.length || !currentVRM) return;
+  playbackActive = true;
+  setStatus('再生中...');
+  document.getElementById('btnPlay').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+
+  if (audioEl) {
+    audioEl.currentTime = 0;
+    audioEl.play().catch(err => log(`音声再生エラー: ${err.message}`));
+  }
+
+  const playStart = performance.now();
+  let idx = 0;
+
+  function step() {
+    if (!playbackActive) return;
+    const elapsed = performance.now() - playStart;
+    while (idx < frames.length && frames[idx].t <= elapsed) {
+      const f = frames[idx];
+      if (f.face) applyFaceRig(f.face);
+      if (f.pose) applyPoseRig(f.pose);
+      if (f.lh) applyHandRig(f.lh, 'Left');
+      if (f.rh) applyHandRig(f.rh, 'Right');
+      idx++;
+    }
+    if (idx < frames.length) {
+      requestAnimationFrame(step);
+    } else {
+      stopPlayback();
+      log('再生完了');
+    }
+  }
+  step();
+});
+
+function stopPlayback() {
+  playbackActive = false;
+  if (audioEl) audioEl.pause();
+  setStatus('待機中');
+  document.getElementById('btnPlay').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+}
+
+document.getElementById('btnStop').addEventListener('click', stopPlayback);
+
+log('準備完了。VRM・モーション(JSON)・音声を読み込んでください。');
+setStatus('待機中');
+</script>
+</body>
+</html>
