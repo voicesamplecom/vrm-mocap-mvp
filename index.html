@@ -338,9 +338,10 @@ async function startAudioRecording() {
     audioChunks = [];
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = () => {
-      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const mime = mediaRecorder.mimeType || 'audio/webm';
+      audioBlob = new Blob(audioChunks, { type: mime });
       document.getElementById('btnDownloadAudio').disabled = false;
-      log(`音声保存完了 (${(audioBlob.size / 1024).toFixed(1)} KB)`);
+      log(`音声保存完了 (${(audioBlob.size / 1024).toFixed(1)} KB, ${mime})`);
     };
     mediaRecorder.start();
   } catch (err) {
