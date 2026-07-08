@@ -493,34 +493,32 @@ document.getElementById('btnPlay').addEventListener('click', () => {
   step();
 });
 
-// ---------- Downloads (新規タブで開き、Safari標準の共有アイコンから保存する方式) ----------
+// ---------- Downloads ----------
 const downloadLinksEl = document.getElementById('downloadLinks');
 
-function showDownloadLink(blob, filename, label) {
+function showDownloadLink(url, filename, label) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
   a.textContent = `⬇ ${label} (タップして保存: ${filename})`;
   downloadLinksEl.appendChild(a);
 }
 
-function openInNewTab(blob, filename, label) {
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-  log(`${label}を新しいタブで開きました。そのタブの右上「共有」アイコン(四角に上矢印)→「"ファイル"に保存」で保存してください。`);
-  // 念のため直接リンクも残す
-  showDownloadLink(blob, filename, label);
-}
-
 document.getElementById('btnDownloadJson').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(frames, null, 2)], { type: 'application/json' });
-  openInNewTab(blob, `tracking-${Date.now()}.json`, 'JSON');
+  const json = JSON.stringify(frames);
+  // data URLにすると、Safariがテキストページ表示ではなくダウンロードとして扱う
+  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
+  showDownloadLink(dataUrl, `tracking-${Date.now()}.json`, 'JSON');
+  log('JSONの保存リンクを表示しました。緑のリンクをタップしてください。');
 });
 
 document.getElementById('btnDownloadAudio').addEventListener('click', () => {
   if (!audioBlob) { log('音声データがありません'); return; }
   const ext = (audioBlob.type.split('/')[1] || 'webm').split(';')[0];
-  openInNewTab(audioBlob, `audio-${Date.now()}.${ext}`, '音声');
+  const url = URL.createObjectURL(audioBlob);
+  window.open(url, '_blank');
+  log('音声を開きました。共有アイコン→「"ファイル"に保存」で保存してください。');
+  showDownloadLink(url, `audio-${Date.now()}.${ext}`, '音声');
 });
 
 log('準備完了。VRMを読み込んでからカメラを開始してください。');
