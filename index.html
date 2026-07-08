@@ -126,7 +126,6 @@
     </label>
     <button id="btnCamera">カメラ開始</button>
     <button id="btnRec" class="rec" disabled>記録開始</button>
-    <button id="btnStop" class="stop" disabled>記録停止</button>
     <button id="btnPlay" class="play" disabled>再生検証</button>
     <button id="btnDownloadJson" disabled>JSON保存</button>
     <button id="btnDownloadAudio" disabled>音声保存</button>
@@ -369,7 +368,26 @@ function onHolisticResults(results) {
   }
 }
 
-document.getElementById('btnCamera').addEventListener('click', async () => {
+const btnCamera = document.getElementById('btnCamera');
+const btnRec = document.getElementById('btnRec');
+
+btnCamera.addEventListener('click', async () => {
+  // --- カメラ停止(トグル) ---
+  if (cameraStarted) {
+    if (recording) { log('記録中はカメラを停止できません。先に記録を停止してください。'); return; }
+    try {
+      if (cameraUtil) { await cameraUtil.stop(); cameraUtil = null; }
+      if (holistic) { holistic.close(); holistic = null; }
+    } catch (err) { /* stop時のエラーは無視 */ }
+    cameraStarted = false;
+    btnCamera.textContent = 'カメラ開始';
+    btnRec.disabled = true;
+    setStatus('カメラ停止中(保存などの操作はこの状態が軽量です)');
+    log('カメラ停止');
+    return;
+  }
+
+  // --- カメラ開始 ---
   try {
     setStatus('カメラ準備中...');
     holistic = new Holistic({
@@ -385,15 +403,16 @@ document.getElementById('btnCamera').addEventListener('click', async () => {
     holistic.onResults(onHolisticResults);
 
     cameraUtil = new Camera(videoInput, {
-      onFrame: async () => { await holistic.send({ image: videoInput }); },
+      onFrame: async () => { if (holistic) await holistic.send({ image: videoInput }); },
       width: 640,
       height: 480
     });
     await cameraUtil.start();
     cameraStarted = true;
+    btnCamera.textContent = 'カメラ停止';
     setStatus('カメラ稼働中(全身+手指トラッキング中)');
     log('カメラ開始(顔+全身+手指)');
-    document.getElementById('btnRec').disabled = false;
+    btnRec.disabled = false;
   } catch (err) {
     log(`カメラエラー: ${err.message}`);
     setStatus('カメラエラー');
@@ -426,31 +445,32 @@ function stopAudioRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 }
 
-// ---------- Recording controls ----------
-document.getElementById('btnRec').addEventListener('click', () => {
+// ---------- Recording controls (トグル) ----------
+btnRec.addEventListener('click', () => {
+  // --- 記録停止 ---
+  if (recording) {
+    recording = false;
+    recDot.classList.remove('on');
+    stopAudioRecording();
+    btnRec.textContent = '記録開始';
+    setStatus(cameraStarted ? 'カメラ稼働中(全身+手指トラッキング中)' : '待機中');
+    log(`記録停止: ${frames.length} フレーム。カメラを停止してから保存すると軽量です。`);
+    document.getElementById('btnPlay').disabled = frames.length === 0;
+    document.getElementById('btnDownloadJson').disabled = frames.length === 0;
+    return;
+  }
+
+  // --- 記録開始 ---
   frames = [];
   startTime = performance.now();
   recording = true;
   recDot.classList.add('on');
+  btnRec.textContent = '記録停止';
   setStatus('記録中...');
   frameCountEl.textContent = 'frames: 0';
   startAudioRecording();
   log('記録開始');
-  document.getElementById('btnRec').disabled = true;
-  document.getElementById('btnStop').disabled = false;
   document.getElementById('btnPlay').disabled = true;
-});
-
-document.getElementById('btnStop').addEventListener('click', () => {
-  recording = false;
-  recDot.classList.remove('on');
-  stopAudioRecording();
-  setStatus(cameraStarted ? 'カメラ稼働中(顔トラッキング中)' : '待機中');
-  log(`記録停止: ${frames.length} フレーム`);
-  document.getElementById('btnRec').disabled = false;
-  document.getElementById('btnStop').disabled = true;
-  document.getElementById('btnPlay').disabled = frames.length === 0;
-  document.getElementById('btnDownloadJson').disabled = frames.length === 0;
 });
 
 // ---------- Playback ----------
