@@ -349,12 +349,23 @@ function applyPoseRig(riggedPose) {
   rigRotation('RightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
 }
 
+function clampRotation(rotation, maxRad) {
+  return {
+    x: Math.max(-maxRad, Math.min(maxRad, rotation.x)),
+    y: Math.max(-maxRad, Math.min(maxRad, rotation.y)),
+    z: Math.max(-maxRad, Math.min(maxRad, rotation.z))
+  };
+}
+
 function applyHandRig(riggedHand, side) {
   if (!currentVRM || !riggedHand) return;
   for (const key in riggedHand) {
     // KalidokitはWrist、VRMはHandという名前なので変換
     const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
-    rigRotation(boneKey, riggedHand[key], 1, 0.3);
+    // 手首・指があり得ない角度に行かないよう制限(手首は約57度、指の関節は約80度まで)
+    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
+    const clamped = clampRotation(riggedHand[key], maxRad);
+    rigRotation(boneKey, clamped, 1, 0.3);
   }
 }
 
