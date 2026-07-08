@@ -422,10 +422,13 @@ function openAudio() {
 
 document.getElementById('btnDownloadJson').addEventListener('click', () => {
   const json = JSON.stringify(frames);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-  log(`モーションJSONを開きました (${(blob.size / 1024).toFixed(0)} KB)。共有アイコン→「"ファイル"に保存」で保存してください。`);
+  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = `motion-${Date.now()}.json`;
+  a.textContent = `⬇ モーションJSON (タップして保存: ${(json.length / 1024).toFixed(0)}KB)`;
+  document.getElementById('downloadLinks').appendChild(a);
+  log('モーションJSONの保存リンクを表示しました。緑のリンクをタップしてください。');
 });
 
 log('準備完了。VRMと動画を読み込んでください。');
