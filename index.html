@@ -147,8 +147,8 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
 
-<!-- MediaPipe FaceMesh -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<!-- MediaPipe Holistic (顔+全身+手指) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
 <!-- KalidoKit -->
@@ -201,6 +201,7 @@ window.addEventListener('resize', resizeRenderer);
 
 let currentVRM = null;
 const clock = new THREE.Clock();
+let blinkLSmooth = 0, blinkRSmooth = 0;
 
 function animate() {
   requestAnimationFrame(animate);
@@ -315,28 +316,82 @@ function applyFaceRig(riggedFace) {
   }
 }
 
-// ---------- MediaPipe FaceMesh ----------
+function rigPosition(name, position = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  const vector = new THREE.Vector3(position.x * dampener, position.y * dampener, position.z * dampener);
+  node.position.lerp(vector, lerpAmount);
+}
+
+function applyPoseRig(riggedPose) {
+  if (!currentVRM || !riggedPose) return;
+  rigRotation('Hips', riggedPose.Hips.rotation, 0.7, 0.3);
+  rigPosition('Hips', {
+    x: riggedPose.Hips.position.x,
+    y: riggedPose.Hips.position.y + 1,
+    z: -riggedPose.Hips.position.z
+  }, 1, 0.07);
+
+  rigRotation('Chest', riggedPose.Spine, 0.25, 0.3);
+  rigRotation('Spine', riggedPose.Spine, 0.45, 0.3);
+
+  rigRotation('RightUpperArm', riggedPose.RightUpperArm, 1, 0.3);
+  rigRotation('RightLowerArm', riggedPose.RightLowerArm, 1, 0.3);
+  rigRotation('LeftUpperArm', riggedPose.LeftUpperArm, 1, 0.3);
+  rigRotation('LeftLowerArm', riggedPose.LeftLowerArm, 1, 0.3);
+
+  rigRotation('LeftUpperLeg', riggedPose.LeftUpperLeg, 1, 0.3);
+  rigRotation('LeftLowerLeg', riggedPose.LeftLowerLeg, 1, 0.3);
+  rigRotation('RightUpperLeg', riggedPose.RightUpperLeg, 1, 0.3);
+  rigRotation('RightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
+}
+
+function applyHandRig(riggedHand, side) {
+  if (!currentVRM || !riggedHand) return;
+  for (const key in riggedHand) {
+    // KalidokitはWrist、VRMはHandという名前なので変換
+    const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
+    rigRotation(boneKey, riggedHand[key], 1, 0.3);
+  }
+}
+
+// ---------- MediaPipe Holistic ----------
 const videoInput = document.getElementById('videoInput');
-let faceMesh = null;
+let holistic = null;
 let cameraUtil = null;
 let cameraStarted = false;
 
 let recording = false;
 let frames = [];
 let startTime = 0;
-let blinkLSmooth = 0, blinkRSmooth = 0;
 
-function onFaceResults(results) {
-  if (!results.multiFaceLandmarks || !results.multiFaceLandmarks[0]) return;
-  const riggedFace = Kalidokit.Face.solve(results.multiFaceLandmarks[0], {
-    runtime: 'mediapipe',
-    video: videoInput
-  });
-  if (!riggedFace) return;
-  applyFaceRig(riggedFace);
+function onHolisticResults(results) {
+  let currentFace = null, currentPose = null, currentLH = null, currentRH = null;
+
+  if (results.faceLandmarks) {
+    currentFace = Kalidokit.Face.solve(results.faceLandmarks, { runtime: 'mediapipe', video: videoInput });
+    if (currentFace) applyFaceRig(currentFace);
+  }
+
+  const poseLm3d = results.za || results.poseWorldLandmarks;
+  if (poseLm3d && results.poseLandmarks) {
+    currentPose = Kalidokit.Pose.solve(poseLm3d, results.poseLandmarks, { runtime: 'mediapipe', video: videoInput, enableLegs: true });
+    if (currentPose) applyPoseRig(currentPose);
+  }
+
+  if (results.rightHandLandmarks) {
+    currentRH = Kalidokit.Hand.solve(results.rightHandLandmarks, 'Right');
+    if (currentRH) applyHandRig(currentRH, 'Right');
+  }
+  if (results.leftHandLandmarks) {
+    currentLH = Kalidokit.Hand.solve(results.leftHandLandmarks, 'Left');
+    if (currentLH) applyHandRig(currentLH, 'Left');
+  }
 
   if (recording) {
-    frames.push({ t: performance.now() - startTime, face: riggedFace });
+    frames.push({ t: performance.now() - startTime, face: currentFace, pose: currentPose, lh: currentLH, rh: currentRH });
     frameCountEl.textContent = `frames: ${frames.length}`;
   }
 }
@@ -344,26 +399,27 @@ function onFaceResults(results) {
 document.getElementById('btnCamera').addEventListener('click', async () => {
   try {
     setStatus('カメラ準備中...');
-    faceMesh = new FaceMesh({
-      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+    holistic = new Holistic({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
     });
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
+    holistic.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      refineFaceLandmarks: true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
     });
-    faceMesh.onResults(onFaceResults);
+    holistic.onResults(onHolisticResults);
 
     cameraUtil = new Camera(videoInput, {
-      onFrame: async () => { await faceMesh.send({ image: videoInput }); },
+      onFrame: async () => { await holistic.send({ image: videoInput }); },
       width: 640,
       height: 480
     });
     await cameraUtil.start();
     cameraStarted = true;
-    setStatus('カメラ稼働中(顔トラッキング中)');
-    log('カメラ開始');
+    setStatus('カメラ稼働中(全身+手指トラッキング中)');
+    log('カメラ開始(顔+全身+手指)');
     document.getElementById('btnRec').disabled = false;
   } catch (err) {
     log(`カメラエラー: ${err.message}`);
@@ -446,7 +502,11 @@ document.getElementById('btnPlay').addEventListener('click', () => {
     if (!playbackActive) return;
     const elapsed = performance.now() - playStart;
     while (idx < frames.length && frames[idx].t <= elapsed) {
-      applyFaceRig(frames[idx].face);
+      const f = frames[idx];
+      if (f.face) applyFaceRig(f.face);
+      if (f.pose) applyPoseRig(f.pose);
+      if (f.lh) applyHandRig(f.lh, 'Left');
+      if (f.rh) applyHandRig(f.rh, 'Right');
       idx++;
     }
     if (idx < frames.length) {
