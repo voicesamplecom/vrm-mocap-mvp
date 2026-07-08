@@ -262,6 +262,7 @@ document.getElementById('videoFileInput').addEventListener('change', (e) => {
   videoInput.src = URL.createObjectURL(file);
   videoInput.onloadedmetadata = () => {
     log(`動画読み込み完了: ${file.name} (長さ ${videoInput.duration.toFixed(1)}秒)`);
+    document.getElementById('btnDownloadAudio').disabled = false;
     checkReady();
   };
 });
@@ -421,13 +422,10 @@ function openAudio() {
 
 document.getElementById('btnDownloadJson').addEventListener('click', () => {
   const json = JSON.stringify(frames);
-  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = `motion-${Date.now()}.json`;
-  a.textContent = `⬇ モーションJSON (タップして保存)`;
-  document.getElementById('downloadLinks').appendChild(a);
-  log('モーションJSONの保存リンクを表示しました。');
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  log(`モーションJSONを開きました (${(blob.size / 1024).toFixed(0)} KB)。共有アイコン→「"ファイル"に保存」で保存してください。`);
 });
 
 log('準備完了。VRMと動画を読み込んでください。');
