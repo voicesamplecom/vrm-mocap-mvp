@@ -130,13 +130,6 @@
     <button id="btnPlay" class="play" disabled>再生検証</button>
     <button id="btnDownloadJson" disabled>JSON保存</button>
     <button id="btnDownloadAudio" disabled>音声保存</button>
-    <label class="file-btn">
-      背景画像
-      <input type="file" id="bgImageInput" accept="image/*">
-    </label>
-    <input type="color" id="bgColorInput" value="#00b140" style="height:38px;width:44px;border-radius:6px;border:1px solid #3a3f4a;background:none;padding:2px;">
-    <button id="btnGreenScreen">グリーンバック</button>
-    <button id="btnBgClear">背景クリア</button>
   </div>
 
   <div id="downloadLinks"></div>
@@ -212,38 +205,6 @@ function animate() {
   renderer.render(scene, camera3d);
 }
 animate();
-
-document.getElementById('bgImageInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  new THREE.TextureLoader().load(
-    url,
-    (texture) => { scene.background = texture; log('背景画像を設定しました'); },
-    undefined,
-    (err) => log(`背景画像の読み込みエラー: ${err.message || err}`)
-  );
-});
-
-const bgColorInput = document.getElementById('bgColorInput');
-function applyBgColor(e) {
-  scene.background = new THREE.Color(e.target.value);
-  log(`背景色を ${e.target.value} に設定しました`);
-}
-bgColorInput.addEventListener('input', applyBgColor);
-bgColorInput.addEventListener('change', applyBgColor);
-
-document.getElementById('btnGreenScreen').addEventListener('click', () => {
-  const greenHex = '#00b140'; // クロマキー合成でよく使われる緑
-  bgColorInput.value = greenHex;
-  scene.background = new THREE.Color(greenHex);
-  log('グリーンバックにしました(クロマキー合成向け)');
-});
-
-document.getElementById('btnBgClear').addEventListener('click', () => {
-  scene.background = null;
-  log('背景を透明に戻しました');
-});
 
 // ---------- VRM loading ----------
 const gltfLoader = new THREE.GLTFLoader();
