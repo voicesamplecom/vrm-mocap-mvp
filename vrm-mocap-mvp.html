@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRM モーションキャプチャ MVP - 技術検証</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #16181d;
+    color: #e8e8e8;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    padding: 10px 16px;
+    background: #1e2128;
+    border-bottom: 1px solid #2c3038;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; color: #8fd3c7; }
+  header p { font-size: 12px; margin: 4px 0 0; color: #8a8f98; }
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #viewport-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #0c0d10;
+  }
+  #canvas { display: block; width: 100%; height: 100%; }
+  video#videoInput { display: none; }
+  #controls {
+    padding: 10px 12px;
+    background: #1e2128;
+    border-top: 1px solid #2c3038;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  button, label.file-btn {
+    background: #2c3038;
+    color: #e8e8e8;
+    border: 1px solid #3a3f4a;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:active, label.file-btn:active { background: #3a3f4a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.rec { background: #7a2b2b; border-color: #a33; }
+  button.stop { background: #7a5a1f; border-color: #b8860b; }
+  button.play { background: #1f5a3a; border-color: #2f8f5e; }
+  input[type=file] { display: none; }
+  #status {
+    font-size: 11px;
+    color: #8a8f98;
+    padding: 4px 4px 0;
+    display: flex;
+    justify-content: space-between;
+  }
+  #log {
+    height: 90px;
+    overflow-y: auto;
+    background: #0c0d10;
+    border-top: 1px solid #2c3038;
+    padding: 6px 12px;
+    font-family: "SF Mono", monospace;
+    font-size: 11px;
+    color: #7fb890;
+    line-height: 1.5;
+  }
+  #log div { white-space: pre-wrap; word-break: break-all; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:#555; }
+  .dot.on { background:#e05252; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VRM モーションキャプチャ MVP</h1>
+  <p>技術検証:トラッキングデータ + 音声を記録 → カメラなしで再生 → 同じ動きが再現されるか確認</p>
+</header>
+
+<main>
+  <div id="viewport-wrap">
+    <canvas id="canvas"></canvas>
+    <video id="videoInput" playsinline></video>
+  </div>
+
+  <div id="status">
+    <span><span id="recDot" class="dot"></span><span id="statusText">未初期化</span></span>
+    <span id="frameCount">frames: 0</span>
+  </div>
+
+  <div id="controls">
+    <label class="file-btn">
+      VRM読み込み
+      <input type="file" id="vrmInput" accept=".vrm">
+    </label>
+    <button id="btnCamera">カメラ開始</button>
+    <button id="btnRec" class="rec" disabled>記録開始</button>
+    <button id="btnStop" class="stop" disabled>記録停止</button>
+    <button id="btnPlay" class="play" disabled>再生検証</button>
+    <button id="btnDownloadJson" disabled>JSON保存</button>
+    <button id="btnDownloadAudio" disabled>音声保存</button>
+  </div>
+
+  <div id="log"></div>
+</main>
+
+<!-- Three.js + three-vrm (legacy 0.x API, matches original Kalidoface-style demos) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+
+<!-- MediaPipe FaceMesh -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<!-- KalidoKit -->
+<script src="https://cdn.jsdelivr.net/npm/kalidokit@1.1/dist/kalidokit.umd.js"></script>
+
+<script>
+/* ============================================================
+   NOTE (技術検証の前提):
+   CDNバージョン・APIの細部(特にKalidoKitの出力プロパティ名、
+   three-vrmのボーン/ブレンドシェイプAPI)は、実機で1回動かして
+   ズレを確認しながら微調整する前提のドラフトです。
+   まずは「記録→再生で同じ動きが再現されるか」の骨格を検証してください。
+   ============================================================ */
+
+const logEl = document.getElementById('log');
+const statusText = document.getElementById('statusText');
+const recDot = document.getElementById('recDot');
+const frameCountEl = document.getElementById('frameCount');
+
+function log(msg) {
+  const d = document.createElement('div');
+  const time = new Date().toLocaleTimeString();
+  d.textContent = `[${time}] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(msg);
+}
+function setStatus(s) { statusText.textContent = s; }
+
+// ---------- Three.js setup ----------
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+const scene = new THREE.Scene();
+const camera3d = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+camera3d.position.set(0, 1.4, 2.2);
+camera3d.lookAt(0, 1.3, 0);
+
+const light = new THREE.DirectionalLight(0xffffff, 1.2);
+light.position.set(1, 1, 1);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+function resizeRenderer() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera3d.aspect = w / h;
+  camera3d.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+let currentVRM = null;
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  resizeRenderer();
+  const delta = clock.getDelta();
+  if (currentVRM) currentVRM.update(delta);
+  renderer.render(scene, camera3d);
+}
+animate();
+
+// ---------- VRM loading ----------
+const gltfLoader = new THREE.GLTFLoader();
+
+document.getElementById('vrmInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  log(`VRM読み込み中: ${file.name}`);
+  gltfLoader.load(url, (gltf) => {
+    THREE_VRM.VRM.from(gltf).then((vrm) => {
+      if (currentVRM) scene.remove(currentVRM.scene);
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      log('VRM読み込み完了');
+    }).catch(err => log(`VRM変換エラー: ${err.message}`));
+  }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
+});
+
+// ---------- Face rig application ----------
+function rigRotation(name, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  const euler = new THREE.Euler(
+    rotation.x * dampener,
+    rotation.y * dampener,
+    rotation.z * dampener,
+    'XYZ'
+  );
+  const quat = new THREE.Quaternion().setFromEuler(euler);
+  node.quaternion.slerp(quat, lerpAmount);
+}
+
+function setBlendShape(presetName, value, lerpAmount = 0.4) {
+  if (!currentVRM || !currentVRM.blendShapeProxy) return;
+  const preset = THREE_VRM.VRMSchema.BlendShapePresetName[presetName];
+  if (preset === undefined) return;
+  const current = currentVRM.blendShapeProxy.getValue(preset) || 0;
+  const next = current + (value - current) * lerpAmount;
+  currentVRM.blendShapeProxy.setValue(preset, next);
+}
+
+function applyFaceRig(riggedFace) {
+  if (!currentVRM || !riggedFace) return;
+  // 頭の向き
+  rigRotation('Neck', { x: riggedFace.head.x * 0.5, y: riggedFace.head.y * 0.5, z: riggedFace.head.z * 0.5 }, 0.7, 0.4);
+  rigRotation('Head', riggedFace.head, 0.7, 0.4);
+
+  // まばたき (Kalidokit: eye.l / eye.r は開き具合。1に近いほど開いている想定 → 閉じ量に変換)
+  const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
+  const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
+  setBlendShape('BLINK_L', blinkL);
+  setBlendShape('BLINK_R', blinkR);
+
+  // 口の形 (母音シェイプ)
+  if (riggedFace.mouth && riggedFace.mouth.shape) {
+    setBlendShape('A', riggedFace.mouth.shape.A);
+    setBlendShape('I', riggedFace.mouth.shape.I);
+    setBlendShape('U', riggedFace.mouth.shape.U);
+    setBlendShape('E', riggedFace.mouth.shape.E);
+    setBlendShape('O', riggedFace.mouth.shape.O);
+  }
+}
+
+// ---------- MediaPipe FaceMesh ----------
+const videoInput = document.getElementById('videoInput');
+let faceMesh = null;
+let cameraUtil = null;
+let cameraStarted = false;
+
+let recording = false;
+let frames = [];
+let startTime = 0;
+
+function onFaceResults(results) {
+  if (!results.multiFaceLandmarks || !results.multiFaceLandmarks[0]) return;
+  const riggedFace = Kalidokit.Face.solve(results.multiFaceLandmarks[0], {
+    runtime: 'mediapipe',
+    video: videoInput
+  });
+  if (!riggedFace) return;
+  applyFaceRig(riggedFace);
+
+  if (recording) {
+    frames.push({ t: performance.now() - startTime, face: riggedFace });
+    frameCountEl.textContent = `frames: ${frames.length}`;
+  }
+}
+
+document.getElementById('btnCamera').addEventListener('click', async () => {
+  try {
+    setStatus('カメラ準備中...');
+    faceMesh = new FaceMesh({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    faceMesh.onResults(onFaceResults);
+
+    cameraUtil = new Camera(videoInput, {
+      onFrame: async () => { await faceMesh.send({ image: videoInput }); },
+      width: 640,
+      height: 480
+    });
+    await cameraUtil.start();
+    cameraStarted = true;
+    setStatus('カメラ稼働中(顔トラッキング中)');
+    log('カメラ開始');
+    document.getElementById('btnRec').disabled = false;
+  } catch (err) {
+    log(`カメラエラー: ${err.message}`);
+    setStatus('カメラエラー');
+  }
+});
+
+// ---------- Audio recording ----------
+let mediaRecorder = null;
+let audioChunks = [];
+let audioBlob = null;
+
+async function startAudioRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      document.getElementById('btnDownloadAudio').disabled = false;
+      log(`音声保存完了 (${(audioBlob.size / 1024).toFixed(1)} KB)`);
+    };
+    mediaRecorder.start();
+  } catch (err) {
+    log(`マイクエラー: ${err.message}`);
+  }
+}
+function stopAudioRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+}
+
+// ---------- Recording controls ----------
+document.getElementById('btnRec').addEventListener('click', () => {
+  frames = [];
+  startTime = performance.now();
+  recording = true;
+  recDot.classList.add('on');
+  setStatus('記録中...');
+  frameCountEl.textContent = 'frames: 0';
+  startAudioRecording();
+  log('記録開始');
+  document.getElementById('btnRec').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('btnPlay').disabled = true;
+});
+
+document.getElementById('btnStop').addEventListener('click', () => {
+  recording = false;
+  recDot.classList.remove('on');
+  stopAudioRecording();
+  setStatus(cameraStarted ? 'カメラ稼働中(顔トラッキング中)' : '待機中');
+  log(`記録停止: ${frames.length} フレーム`);
+  document.getElementById('btnRec').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnPlay').disabled = frames.length === 0;
+  document.getElementById('btnDownloadJson').disabled = frames.length === 0;
+});
+
+// ---------- Playback ----------
+let playbackActive = false;
+
+document.getElementById('btnPlay').addEventListener('click', () => {
+  if (!frames.length) { log('再生できるフレームがありません'); return; }
+  playbackActive = true;
+  setStatus('再生検証中...');
+  log('再生開始(カメラ入力なし、記録データのみで再現)');
+
+  let audioEl = null;
+  if (audioBlob) {
+    audioEl = new Audio(URL.createObjectURL(audioBlob));
+    audioEl.play().catch(err => log(`音声再生エラー: ${err.message}`));
+  }
+
+  const playStart = performance.now();
+  let idx = 0;
+
+  function step() {
+    if (!playbackActive) return;
+    const elapsed = performance.now() - playStart;
+    while (idx < frames.length && frames[idx].t <= elapsed) {
+      applyFaceRig(frames[idx].face);
+      idx++;
+    }
+    if (idx < frames.length) {
+      requestAnimationFrame(step);
+    } else {
+      playbackActive = false;
+      setStatus(cameraStarted ? 'カメラ稼働中(顔トラッキング中)' : '待機中');
+      log('再生完了:最後まで再現されました');
+    }
+  }
+  step();
+});
+
+// ---------- Downloads ----------
+function triggerDownload(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+document.getElementById('btnDownloadJson').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(frames, null, 2)], { type: 'application/json' });
+  triggerDownload(blob, `tracking-${Date.now()}.json`);
+  log('JSON保存しました');
+});
+
+document.getElementById('btnDownloadAudio').addEventListener('click', () => {
+  if (!audioBlob) { log('音声データがありません'); return; }
+  triggerDownload(audioBlob, `audio-${Date.now()}.webm`);
+  log('音声保存しました');
+});
+
+log('準備完了。VRMを読み込んでからカメラを開始してください。');
+</script>
+</body>
+</html>
