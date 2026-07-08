@@ -69,6 +69,22 @@
     display: flex;
     justify-content: space-between;
   }
+  #downloadLinks {
+    padding: 8px 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #downloadLinks a {
+    display: inline-block;
+    background: #2f8f5e;
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+  }
   #log {
     height: 90px;
     overflow-y: auto;
@@ -116,6 +132,7 @@
     <button id="btnDownloadAudio" disabled>音声保存</button>
   </div>
 
+  <div id="downloadLinks"></div>
   <div id="log"></div>
 </main>
 
@@ -201,7 +218,7 @@ document.getElementById('vrmInput').addEventListener('change', (e) => {
       if (currentVRM) scene.remove(currentVRM.scene);
       currentVRM = vrm;
       scene.add(vrm.scene);
-      vrm.scene.rotation.y = Math.PI;
+      vrm.scene.rotation.y = Math.PI; // VRM0.x は後ろ向きでロードされるため180度回転
       log('VRM読み込み完了');
     }).catch(err => log(`VRM変換エラー: ${err.message}`));
   }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
@@ -241,8 +258,8 @@ function applyFaceRig(riggedFace) {
   // まばたき (Kalidokit: eye.l / eye.r は開き具合。1に近いほど開いている想定 → 閉じ量に変換)
   const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
   const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
-setBlendShape('BlinkL', blinkL);
-setBlendShape('BlinkR', blinkR);
+  setBlendShape('BlinkL', blinkL);
+  setBlendShape('BlinkR', blinkR);
 
   // 口の形 (母音シェイプ)
   if (riggedFace.mouth && riggedFace.mouth.shape) {
@@ -397,26 +414,27 @@ document.getElementById('btnPlay').addEventListener('click', () => {
   step();
 });
 
-// ---------- Downloads ----------
-function triggerDownload(blob, filename) {
+// ---------- Downloads (タップして保存するリンクを表示する方式) ----------
+const downloadLinksEl = document.getElementById('downloadLinks');
+
+function showDownloadLink(blob, filename, label) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.textContent = `⬇ ${label} (タップして保存: ${filename})`;
+  downloadLinksEl.appendChild(a);
 }
 
 document.getElementById('btnDownloadJson').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(frames, null, 2)], { type: 'application/json' });
-  triggerDownload(blob, `tracking-${Date.now()}.json`);
-  log('JSON保存しました');
+  showDownloadLink(blob, `tracking-${Date.now()}.json`, 'JSON');
+  log('JSONリンクを表示しました。上のリンクをタップして保存してください。');
 });
 
 document.getElementById('btnDownloadAudio').addEventListener('click', () => {
   if (!audioBlob) { log('音声データがありません'); return; }
-  triggerDownload(audioBlob, `audio-${Date.now()}.webm`);
-  log('音声保存しました');
+  showDownloadLink(audioBlob, `audio-${Date.now()}.webm`, '音声');
+  log('音声リンクを表示しました。上のリンクをタップして保存してください。');
 });
 
 log('準備完了。VRMを読み込んでからカメラを開始してください。');
