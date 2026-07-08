@@ -201,6 +201,7 @@ document.getElementById('vrmInput').addEventListener('change', (e) => {
       if (currentVRM) scene.remove(currentVRM.scene);
       currentVRM = vrm;
       scene.add(vrm.scene);
+      vrm.scene.rotation.y = Math.PI;
       log('VRM読み込み完了');
     }).catch(err => log(`VRM変換エラー: ${err.message}`));
   }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
