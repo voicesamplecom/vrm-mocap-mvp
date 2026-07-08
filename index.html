@@ -415,7 +415,7 @@ document.getElementById('btnPlay').addEventListener('click', () => {
   step();
 });
 
-// ---------- Downloads (タップして保存するリンクを表示する方式) ----------
+// ---------- Downloads (共有シート経由。失敗時のみリンク表示にフォールバック) ----------
 const downloadLinksEl = document.getElementById('downloadLinks');
 
 function showDownloadLink(blob, filename, label) {
@@ -426,16 +426,30 @@ function showDownloadLink(blob, filename, label) {
   downloadLinksEl.appendChild(a);
 }
 
+async function shareOrDownload(blob, filename, mimeType, label) {
+  try {
+    const file = new File([blob], filename, { type: mimeType });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      log(`共有シートを表示しました。「ファイルに保存」を選んでください。`);
+      return;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') { log('共有をキャンセルしました'); return; }
+    log(`共有に失敗、リンク表示に切り替えます: ${err.message}`);
+  }
+  showDownloadLink(blob, filename, label);
+}
+
 document.getElementById('btnDownloadJson').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(frames, null, 2)], { type: 'application/json' });
-  showDownloadLink(blob, `tracking-${Date.now()}.json`, 'JSON');
-  log('JSONリンクを表示しました。上のリンクをタップして保存してください。');
+  shareOrDownload(blob, `tracking-${Date.now()}.json`, 'application/json', 'JSON');
 });
 
 document.getElementById('btnDownloadAudio').addEventListener('click', () => {
   if (!audioBlob) { log('音声データがありません'); return; }
-  showDownloadLink(audioBlob, `audio-${Date.now()}.webm`, '音声');
-  log('音声リンクを表示しました。上のリンクをタップして保存してください。');
+  const ext = (audioBlob.type.split('/')[1] || 'webm').split(';')[0];
+  shareOrDownload(audioBlob, `audio-${Date.now()}.${ext}`, audioBlob.type, '音声');
 });
 
 log('準備完了。VRMを読み込んでからカメラを開始してください。');
