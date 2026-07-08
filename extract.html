@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRM モーション抽出 - 動画から高精度キャプチャ</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #16181d;
+    color: #e8e8e8;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header { padding: 10px 16px; background: #1e2128; border-bottom: 1px solid #2c3038; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; color: #8fb3d3; }
+  header p { font-size: 12px; margin: 4px 0 0; color: #8a8f98; }
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #viewport-wrap { position: relative; flex: 1; min-height: 0; background: #0c0d10; }
+  #canvas { display: block; width: 100%; height: 100%; }
+  video#videoInput { display: none; }
+  #progressWrap {
+    padding: 8px 12px 0;
+  }
+  #progressBar {
+    height: 8px;
+    background: #2c3038;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  #progressFill { height: 100%; width: 0%; background: #4a90d9; transition: width 0.2s; }
+  #status {
+    font-size: 11px;
+    color: #8a8f98;
+    padding: 4px 4px 0;
+    display: flex;
+    justify-content: space-between;
+  }
+  #controls {
+    padding: 10px 12px;
+    background: #1e2128;
+    border-top: 1px solid #2c3038;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  button, label.file-btn {
+    background: #2c3038;
+    color: #e8e8e8;
+    border: 1px solid #3a3f4a;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:active, label.file-btn:active { background: #3a3f4a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.go { background: #1f4a7a; border-color: #2f6fae; }
+  input[type=file] { display: none; }
+  #downloadLinks { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 6px; }
+  #downloadLinks a {
+    display: inline-block; background: #2f8f5e; color: #fff; text-decoration: none;
+    font-size: 13px; padding: 8px 12px; border-radius: 6px; text-align: center;
+  }
+  #log {
+    height: 80px; overflow-y: auto; background: #0c0d10; border-top: 1px solid #2c3038;
+    padding: 6px 12px; font-family: "SF Mono", monospace; font-size: 11px; color: #8fb3d3; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VRM モーション抽出</h1>
+  <p>撮影済み動画を1フレームずつ解析(最高精度) → モーションJSON + 音声(WAV)を書き出し</p>
+</header>
+
+<main>
+  <div id="viewport-wrap">
+    <canvas id="canvas"></canvas>
+    <video id="videoInput" playsinline muted></video>
+  </div>
+
+  <div id="progressWrap">
+    <div id="progressBar"><div id="progressFill"></div></div>
+  </div>
+  <div id="status">
+    <span id="statusText">未初期化</span>
+    <span id="frameInfo">frames: 0</span>
+  </div>
+
+  <div id="controls">
+    <label class="file-btn">
+      VRM読み込み
+      <input type="file" id="vrmInput" accept=".vrm">
+    </label>
+    <label class="file-btn">
+      動画読み込み
+      <input type="file" id="videoFileInput" accept="video/*">
+    </label>
+    <button id="btnExtractFps">解析FPS: 15</button>
+    <button id="btnStart" class="go" disabled>解析開始</button>
+    <button id="btnDownloadJson" disabled>モーション保存</button>
+    <button id="btnDownloadAudio" disabled>音声保存</button>
+  </div>
+
+  <div id="log"></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/kalidokit@1.1/dist/kalidokit.umd.js"></script>
+
+<script>
+const logEl = document.getElementById('log');
+const statusText = document.getElementById('statusText');
+const frameInfoEl = document.getElementById('frameInfo');
+const progressFill = document.getElementById('progressFill');
+
+function log(msg) {
+  const d = document.createElement('div');
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setStatus(s) { statusText.textContent = s; }
+
+// ---------- Three.js ----------
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+const scene = new THREE.Scene();
+const camera3d = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+camera3d.position.set(0, 1.4, 2.2);
+camera3d.lookAt(0, 1.3, 0);
+scene.add(new THREE.DirectionalLight(0xffffff, 1.2));
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+function resizeRenderer() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera3d.aspect = w / h;
+  camera3d.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+let currentVRM = null;
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  resizeRenderer();
+  const delta = clock.getDelta();
+  if (currentVRM) currentVRM.update(delta);
+  renderer.render(scene, camera3d);
+}
+animate();
+
+const gltfLoader = new THREE.GLTFLoader();
+document.getElementById('vrmInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  log(`VRM読み込み中: ${file.name}`);
+  gltfLoader.load(url, (gltf) => {
+    THREE_VRM.VRM.from(gltf).then((vrm) => {
+      if (currentVRM) scene.remove(currentVRM.scene);
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      vrm.scene.rotation.y = Math.PI;
+      log('VRM読み込み完了');
+      checkReady();
+    }).catch(err => log(`VRM変換エラー: ${err.message}`));
+  }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
+});
+
+// ---------- リグ処理(index.htmlと同一ロジック) ----------
+function rigRotation(name, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  const euler = new THREE.Euler(rotation.x * dampener, rotation.y * dampener, rotation.z * dampener, 'XYZ');
+  node.quaternion.slerp(new THREE.Quaternion().setFromEuler(euler), lerpAmount);
+}
+function rigPosition(name, position = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
+  if (!currentVRM) return;
+  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
+  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+  if (!node) return;
+  node.position.lerp(new THREE.Vector3(position.x * dampener, position.y * dampener, position.z * dampener), lerpAmount);
+}
+function setBlendShape(presetName, value, lerpAmount = 0.4) {
+  if (!currentVRM || !currentVRM.blendShapeProxy) return;
+  const preset = THREE_VRM.VRMSchema.BlendShapePresetName[presetName];
+  if (preset === undefined) return;
+  const current = currentVRM.blendShapeProxy.getValue(preset) || 0;
+  currentVRM.blendShapeProxy.setValue(preset, current + (value - current) * lerpAmount);
+}
+function applyFaceRig(riggedFace) {
+  if (!currentVRM || !riggedFace) return;
+  rigRotation('Neck', { x: riggedFace.head.x * 0.5, y: riggedFace.head.y * 0.5, z: riggedFace.head.z * 0.5 }, 0.7, 0.4);
+  rigRotation('Head', riggedFace.head, 0.7, 0.4);
+  const blinkL = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
+  const blinkR = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
+  setBlendShape('BlinkL', blinkL < 0.15 ? 0 : blinkL, 1);
+  setBlendShape('BlinkR', blinkR < 0.15 ? 0 : blinkR, 1);
+  if (riggedFace.mouth && riggedFace.mouth.shape) {
+    setBlendShape('A', riggedFace.mouth.shape.A);
+    setBlendShape('I', riggedFace.mouth.shape.I);
+    setBlendShape('U', riggedFace.mouth.shape.U);
+    setBlendShape('E', riggedFace.mouth.shape.E);
+    setBlendShape('O', riggedFace.mouth.shape.O);
+  }
+}
+function applyPoseRig(riggedPose) {
+  if (!currentVRM || !riggedPose) return;
+  rigRotation('Hips', riggedPose.Hips.rotation, 0.7, 0.3);
+  rigPosition('Hips', { x: riggedPose.Hips.position.x, y: riggedPose.Hips.position.y + 1, z: -riggedPose.Hips.position.z }, 1, 0.07);
+  rigRotation('Chest', riggedPose.Spine, 0.25, 0.3);
+  rigRotation('Spine', riggedPose.Spine, 0.45, 0.3);
+  rigRotation('RightUpperArm', riggedPose.RightUpperArm, 1, 0.3);
+  rigRotation('RightLowerArm', riggedPose.RightLowerArm, 1, 0.3);
+  rigRotation('LeftUpperArm', riggedPose.LeftUpperArm, 1, 0.3);
+  rigRotation('LeftLowerArm', riggedPose.LeftLowerArm, 1, 0.3);
+  rigRotation('LeftUpperLeg', riggedPose.LeftUpperLeg, 1, 0.3);
+  rigRotation('LeftLowerLeg', riggedPose.LeftLowerLeg, 1, 0.3);
+  rigRotation('RightUpperLeg', riggedPose.RightUpperLeg, 1, 0.3);
+  rigRotation('RightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
+}
+function clampRotation(rotation, maxRad) {
+  return {
+    x: Math.max(-maxRad, Math.min(maxRad, rotation.x)),
+    y: Math.max(-maxRad, Math.min(maxRad, rotation.y)),
+    z: Math.max(-maxRad, Math.min(maxRad, rotation.z))
+  };
+}
+function applyHandRig(riggedHand, side) {
+  if (!currentVRM || !riggedHand) return;
+  for (const key in riggedHand) {
+    const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
+    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
+    rigRotation(boneKey, clampRotation(riggedHand[key], maxRad), 1, 0.3);
+  }
+}
+
+// ---------- 動画読み込み ----------
+const videoInput = document.getElementById('videoInput');
+let videoFile = null;
+let extractFps = 15;
+
+document.getElementById('videoFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  videoFile = file;
+  videoInput.src = URL.createObjectURL(file);
+  videoInput.onloadedmetadata = () => {
+    log(`動画読み込み完了: ${file.name} (長さ ${videoInput.duration.toFixed(1)}秒)`);
+    checkReady();
+  };
+});
+
+document.getElementById('btnExtractFps').addEventListener('click', (e) => {
+  const options = [10, 15, 20, 30];
+  const idx = options.indexOf(extractFps);
+  extractFps = options[(idx + 1) % options.length];
+  e.target.textContent = `解析FPS: ${extractFps}`;
+});
+
+function checkReady() {
+  document.getElementById('btnStart').disabled = !(currentVRM && videoFile);
+}
+
+// ---------- Holistic (解析用、最高精度) ----------
+let holistic = null;
+function ensureHolistic() {
+  if (holistic) return;
+  holistic = new Holistic({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}` });
+  holistic.setOptions({
+    modelComplexity: 2,
+    smoothLandmarks: false, // オフライン解析なので生の検出値を保持(平滑化はplayer.html側で行う)
+    refineFaceLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+}
+
+// ---------- 解析ループ ----------
+let frames = [];
+
+function seekTo(time) {
+  return new Promise((resolve) => {
+    const onSeeked = () => { videoInput.removeEventListener('seeked', onSeeked); resolve(); };
+    videoInput.addEventListener('seeked', onSeeked);
+    videoInput.currentTime = time;
+  });
+}
+
+document.getElementById('btnStart').addEventListener('click', async () => {
+  ensureHolistic();
+  frames = [];
+  const duration = videoInput.duration;
+  const step = 1 / extractFps;
+  const totalSteps = Math.ceil(duration / step);
+  setStatus('解析中...');
+  document.getElementById('btnStart').disabled = true;
+  log(`解析開始: 想定フレーム数 約${totalSteps} (FPS=${extractFps}, modelComplexity=2)`);
+
+  let stepIndex = 0;
+
+  await new Promise((resolveAll) => {
+    holistic.onResults((results) => {
+      let face = null, pose = null, lh = null, rh = null;
+
+      if (results.faceLandmarks) {
+        face = Kalidokit.Face.solve(results.faceLandmarks, { runtime: 'mediapipe', video: videoInput });
+        if (face) applyFaceRig(face);
+      }
+      const poseLm3d = results.za || results.poseWorldLandmarks;
+      if (poseLm3d && results.poseLandmarks) {
+        pose = Kalidokit.Pose.solve(poseLm3d, results.poseLandmarks, { runtime: 'mediapipe', video: videoInput, enableLegs: true });
+        if (pose) applyPoseRig(pose);
+      }
+      if (results.rightHandLandmarks) {
+        rh = Kalidokit.Hand.solve(results.rightHandLandmarks, 'Right');
+        if (rh) applyHandRig(rh, 'Right');
+      }
+      if (results.leftHandLandmarks) {
+        lh = Kalidokit.Hand.solve(results.leftHandLandmarks, 'Left');
+        if (lh) applyHandRig(lh, 'Left');
+      }
+
+      frames.push({ t: Math.round(stepIndex * step * 1000), face, pose, lh, rh });
+      frameInfoEl.textContent = `frames: ${frames.length}`;
+      progressFill.style.width = `${Math.min(100, (stepIndex / totalSteps) * 100)}%`;
+
+      stepIndex++;
+      processNext();
+    });
+
+    async function processNext() {
+      const t = stepIndex * step;
+      if (t > duration) {
+        progressFill.style.width = '100%';
+        setStatus('解析完了');
+        log(`解析完了: ${frames.length} フレーム`);
+        document.getElementById('btnDownloadJson').disabled = frames.length === 0;
+        document.getElementById('btnStart').disabled = false;
+        resolveAll();
+        return;
+      }
+      await seekTo(t);
+      await holistic.send({ image: videoInput });
+    }
+    processNext();
+  });
+});
+
+// ---------- 音声抽出(動画内蔵の音声をデコードしてWAV化) ----------
+let audioWavBlob = null;
+
+function encodeWAV(samples, sampleRate, numChannels) {
+  const bytesPerSample = 2;
+  const blockAlign = numChannels * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+  const view = new DataView(buffer);
+  function writeString(offset, str) { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+  writeString(0, 'RIFF'); view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+  writeString(8, 'WAVE'); writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); writeString(36, 'data');
+  view.setUint32(40, samples.length * bytesPerSample, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([view], { type: 'audio/wav' });
+}
+function interleave(l, r) {
+  const out = new Float32Array(l.length + r.length);
+  let idx = 0;
+  for (let i = 0; i < l.length; i++) { out[idx++] = l[i]; out[idx++] = r[i]; }
+  return out;
+}
+
+document.getElementById('btnDownloadAudio').addEventListener('click', async () => {
+  if (audioWavBlob) { openAudio(); return; }
+  if (!videoFile) { log('動画が読み込まれていません'); return; }
+  try {
+    setStatus('音声をデコード中...');
+    const arrayBuffer = await videoFile.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const samples = audioBuffer.numberOfChannels === 2
+      ? interleave(audioBuffer.getChannelData(0), audioBuffer.getChannelData(1))
+      : audioBuffer.getChannelData(0);
+    audioWavBlob = encodeWAV(samples, audioBuffer.sampleRate, audioBuffer.numberOfChannels);
+    log(`音声デコード完了 (${(audioWavBlob.size / 1024 / 1024).toFixed(1)} MB)`);
+    setStatus('解析完了');
+    openAudio();
+  } catch (err) {
+    log(`音声デコードエラー: ${err.message} (動画に音声トラックがない可能性があります)`);
+    setStatus('解析完了');
+  }
+});
+
+function openAudio() {
+  const url = URL.createObjectURL(audioWavBlob);
+  window.open(url, '_blank');
+  log('音声を開きました。共有アイコン→「"ファイル"に保存」で保存してください。');
+}
+
+document.getElementById('btnDownloadJson').addEventListener('click', () => {
+  const json = JSON.stringify(frames);
+  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = `motion-${Date.now()}.json`;
+  a.textContent = `⬇ モーションJSON (タップして保存)`;
+  document.getElementById('downloadLinks').appendChild(a);
+  log('モーションJSONの保存リンクを表示しました。');
+});
+
+log('準備完了。VRMと動画を読み込んでください。');
+</script>
+</body>
+</html>
