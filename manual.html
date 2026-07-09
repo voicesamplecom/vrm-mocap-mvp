@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRM モーションスタジオ - 使い方ガイド</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #16181d;
+    color: #d8dade;
+    line-height: 1.9;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 {
+    font-size: 26px; margin: 8px 0 4px; color: #fff; letter-spacing: 0.02em;
+  }
+  .tagline { color: #8a8f98; font-size: 14px; margin-bottom: 28px; }
+  h2 {
+    font-size: 18px; margin: 44px 0 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #2c3038; color: #fff;
+  }
+  h3 { font-size: 15px; margin: 24px 0 6px; color: #e8e8e8; }
+  p { margin: 8px 0; font-size: 14.5px; }
+  .apps { display: flex; flex-direction: column; gap: 14px; margin: 20px 0; }
+  .app-card {
+    display: block; text-decoration: none; border-radius: 12px; padding: 18px 20px;
+    border: 1px solid #2c3038; background: #1c1f26; transition: background 0.15s;
+  }
+  .app-card:active { background: #262a33; }
+  .app-card .name { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .app-card .desc { font-size: 13.5px; color: #9aa0aa; }
+  .app-card.rec .name { color: #8fd3c7; }
+  .app-card.ext .name { color: #8fb3d3; }
+  .app-card.ply .name { color: #d3a98f; }
+  .flow {
+    background: #1c1f26; border: 1px solid #2c3038; border-radius: 12px;
+    padding: 16px 20px; margin: 16px 0; font-size: 14px;
+  }
+  .flow b { color: #fff; }
+  ol, ul { padding-left: 22px; font-size: 14.5px; }
+  li { margin: 6px 0; }
+  .tip {
+    background: #23282f; border-left: 3px solid #8fd3c7; border-radius: 0 8px 8px 0;
+    padding: 10px 14px; margin: 14px 0; font-size: 13.5px; color: #b8bdc6;
+  }
+  .warn {
+    background: #2a2530; border-left: 3px solid #d3a98f; border-radius: 0 8px 8px 0;
+    padding: 10px 14px; margin: 14px 0; font-size: 13.5px; color: #c6bdb8;
+  }
+  .kbd {
+    background: #2c3038; border-radius: 4px; padding: 1px 7px; font-size: 12.5px;
+    color: #e8e8e8; white-space: nowrap;
+  }
+  .toc { font-size: 14px; }
+  .toc a { color: #8fb3d3; text-decoration: none; }
+  footer { margin-top: 60px; font-size: 12px; color: #5a5f68; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>VRM モーションスタジオ</h1>
+  <p class="tagline">iPadだけで完結する、VRMモデルのモーションキャプチャ・収録・仕上げツール</p>
+
+  <div class="apps">
+    <a class="app-card rec" href="./">
+      <div class="name">① リアルタイム収録</div>
+      <div class="desc">カメラで顔・全身・手指をその場でキャプチャ。ベースポーズとのブレンドもここ。リハーサルや手軽な収録に。</div>
+    </a>
+    <a class="app-card ext" href="extract.html">
+      <div class="name">② 動画から抽出</div>
+      <div class="desc">撮影済み動画を1フレームずつ最高精度で解析。時間はかかるが本番品質のモーションが欲しい時に。</div>
+    </a>
+    <a class="app-card ply" href="player.html">
+      <div class="name">③ プレイヤー(仕上げスタジオ)</div>
+      <div class="desc">保存したモーション+音声を読み込んで、ブレ補正・背景・カメラワークを付けて再生。</div>
+    </a>
+  </div>
+
+  <h2>全体の流れ</h2>
+  <div class="flow">
+    <b>収録する</b>(①リアルタイム or ②動画から)<br>
+    ↓ モーションJSON + 音声ファイルを保存<br>
+    <b>仕上げる</b>(③プレイヤー)<br>
+    ↓ ブレ補正 → 背景・カメラを決めて再生<br>
+    <b>画面収録などで映像化</b>
+  </div>
+  <p>ポイントは「動画として録画する」のではなく「<b>動きのデータ(JSON)と音声を別々に保存する</b>」こと。あとから別のモデルに同じ演技をさせたり、カメラアングルだけ変えたりできます。</p>
+
+  <h2>① リアルタイム収録の使い方</h2>
+  <ol>
+    <li><span class="kbd">VRM読み込み</span> で自分のVRMモデルを選ぶ</li>
+    <li><span class="kbd">カメラ開始</span> をタップ(カメラ・マイクの許可を求められたら許可)</li>
+    <li>モデルが自分の動きに追従するのを確認</li>
+    <li><span class="kbd">記録開始</span> → 演技 → <span class="kbd">記録停止</span></li>
+    <li><span class="kbd">カメラ停止</span> してから保存すると動作が軽い</li>
+    <li><span class="kbd">JSON保存</span> → 画面の緑リンクをタップして保存</li>
+    <li><span class="kbd">音声保存</span> → 開いたページの共有アイコン(<span class="kbd">□↑</span>)→「"ファイル"に保存」</li>
+  </ol>
+
+  <h3>ベースポーズ機能(座り・壁もたれ等)</h3>
+  <ol>
+    <li>VRoid Studioなどで作った <span class="kbd">.vroidpose</span> ファイルを <span class="kbd">ポーズ読み込み</span> で選ぶ</li>
+    <li><span class="kbd">ポーズ固定: オン</span> にすると、腰から下と体幹はポーズを保ち、頭・腕・手・表情だけがトラッキングに追従</li>
+    <li>固定部分にも2%だけ体の揺らぎが乗るので、静止画のような不自然さが出にくい設計</li>
+  </ol>
+  <div class="tip">カメラに全身が映らない「座って収録」でも、脚が暴れなくなります。負荷軽減にも効果あり。</div>
+
+  <h2>② 動画から抽出の使い方</h2>
+  <ol>
+    <li>iPad標準カメラなどで演技を撮影しておく(音声も動画に入れてOK)</li>
+    <li><span class="kbd">VRM読み込み</span> → <span class="kbd">動画読み込み</span></li>
+    <li><span class="kbd">解析FPS</span> をタップで切り替え(15が標準。数字が大きいほど滑らかだが処理時間増)</li>
+    <li><span class="kbd">解析開始</span> → プログレスバーが100%になるまで待つ</li>
+    <li><span class="kbd">モーション保存</span> / <span class="kbd">音声保存</span>(音声は動画内蔵の音をWAV化)</li>
+  </ol>
+  <div class="warn">解析は動画の実時間より長くかかります(最高精度設定のため)。まず数秒の短い動画で試すのがおすすめ。</div>
+
+  <h2>③ プレイヤーの使い方</h2>
+  <ol>
+    <li><span class="kbd">VRM読み込み</span> → <span class="kbd">モーション読み込み</span>(保存したJSON) → <span class="kbd">音声読み込み</span></li>
+    <li><span class="kbd">ブレ補正を適用</span>:手足のプルつき・一瞬の跳ねを除去(強度スライダーで調整、3が標準)</li>
+    <li><span class="kbd">再生</span> で音声と同期再生</li>
+    <li>カメラ操作:<b>1本指ドラッグ=回転 / ピンチ=ズーム / 2本指ドラッグ=移動</b></li>
+    <li>背景:画像読み込み・色指定・<span class="kbd">グリーンバック</span>(クロマキー合成用)</li>
+  </ol>
+  <div class="tip">プレイヤーには関節可動域(ROM)制限が入っており、首や腰が人体としてあり得ない角度になるのを自動で防ぎます。まばたきも左右連動で整えられます(ウインクは残ります)。</div>
+
+  <h2>こんな時は</h2>
+  <h3>ファイルを更新したのに変化がない</h3>
+  <p>Safariが古いページをキャッシュしています。URLの末尾に <span class="kbd">?v=2</span> のような文字を足して開き直してください(数字は毎回変える)。</p>
+
+  <h3>保存ボタンを押しても保存されない</h3>
+  <p>JSONは画面に出る<b>緑のリンクをタップ</b>。音声は開いたページで<b>共有アイコン→「"ファイル"に保存」</b>。保存先は「ファイル」アプリのダウンロード(または指定したフォルダ)です。</p>
+
+  <h3>モデルが後ろを向いている</h3>
+  <p>VRM0.x形式の仕様です。このスタジオの各アプリは自動で正面に直しています。もし後ろ向きになる場合はページを再読み込みしてください。</p>
+
+  <h3>動きがおかしい・ボタンが反応しない</h3>
+  <p>画面下のログに <span class="kbd">⚠ JSエラー</span> が出ていないか確認。出ていたらその文言がそのまま原因調査の手がかりになります。</p>
+
+  <h2>データの考え方(このスタジオの設計思想)</h2>
+  <ul>
+    <li><b>収録は生データ</b>:記録されるJSONは補正前の素の動き。何度でも後から作り直せる</li>
+    <li><b>品質は後段で作る</b>:ブレ補正・可動域制限・まばたき整形はプレイヤー側で再生時に適用</li>
+    <li><b>モデルと演技の分離</b>:同じJSONを別のVRMに読ませれば、同じ演技を別キャラで再現できる</li>
+  </ul>
+
+  <footer>VRM Motion Studio — built with MediaPipe Holistic / KalidoKit / Three.js + three-vrm</footer>
+</div>
+</body>
+</html>
