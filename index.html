@@ -213,6 +213,17 @@ let currentVRM = null;
 const clock = new THREE.Clock();
 let blinkLSmooth = 0, blinkRSmooth = 0;
 
+// ベースポーズ関連の状態(animate()より前に宣言が必要)
+let basePose = null;           // { boneName: THREE.Quaternion }
+let basePoseHipsPos = null;    // THREE.Vector3
+let poseLockEnabled = false;
+const AMBIENT_BLEND = 0.02;    // 固定ボーンに漏らすトラッキング量(2%)
+const POSE_LOCKED_BONES = new Set([
+  'Hips', 'Spine', 'Chest', 'UpperChest',
+  'LeftUpperLeg', 'LeftLowerLeg', 'LeftFoot', 'LeftToes',
+  'RightUpperLeg', 'RightLowerLeg', 'RightFoot', 'RightToes'
+]);
+
 function animate() {
   requestAnimationFrame(animate);
   resizeRenderer();
@@ -228,15 +239,7 @@ animate();
 //   固定(98%ポーズ+2%トラッキング): Hips, Spine, Chest, 両脚
 //   トラッキング: Head, Neck, 肩, 腕, 手, 表情
 // 2%のブレンドは「アンビエントモーション」: 完全静止による人形感を避け、呼吸感を残す
-let basePose = null;           // { boneName: THREE.Quaternion }
-let basePoseHipsPos = null;    // THREE.Vector3
-let poseLockEnabled = false;
-const AMBIENT_BLEND = 0.02;    // 固定ボーンに漏らすトラッキング量(2%)
-const POSE_LOCKED_BONES = new Set([
-  'Hips', 'Spine', 'Chest', 'UpperChest',
-  'LeftUpperLeg', 'LeftLowerLeg', 'LeftFoot', 'LeftToes',
-  'RightUpperLeg', 'RightLowerLeg', 'RightFoot', 'RightToes'
-]);
+// (状態変数はファイル前半、animate()より前で宣言済み)
 
 document.getElementById('poseInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
