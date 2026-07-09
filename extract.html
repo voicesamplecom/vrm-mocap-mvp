@@ -136,6 +136,13 @@ function log(msg) {
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
 }
+// iPadでは開発者コンソールが見えないため、JSエラーを画面ログに出す
+window.addEventListener('error', (e) => {
+  log(`⚠ JSエラー: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  log(`⚠ 非同期エラー: ${e.reason && e.reason.message ? e.reason.message : e.reason}`);
+});
 function setStatus(s) { statusText.textContent = s; }
 
 // ---------- Three.js ----------
