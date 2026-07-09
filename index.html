@@ -134,6 +134,11 @@
     <button id="btnPlay" class="play" disabled>再生検証</button>
     <button id="btnDownloadJson" disabled>JSON保存</button>
     <button id="btnDownloadAudio" disabled>音声保存</button>
+    <label class="file-btn">
+      ポーズ読み込み
+      <input type="file" id="poseInput" accept=".vroidpose,.json">
+    </label>
+    <button id="btnPoseLock" disabled>ポーズ固定: オフ</button>
   </div>
 
   <div id="downloadLinks"></div>
@@ -205,10 +210,101 @@ function animate() {
   requestAnimationFrame(animate);
   resizeRenderer();
   const delta = clock.getDelta();
+  if (typeof enforceBasePose === 'function') enforceBasePose();
   if (currentVRM) currentVRM.update(delta);
   renderer.render(scene, camera3d);
 }
 animate();
+
+// ---------- ベースポーズ (.vroidpose) ----------
+// ポーズ固定中の役割分担:
+//   固定(98%ポーズ+2%トラッキング): Hips, Spine, Chest, 両脚
+//   トラッキング: Head, Neck, 肩, 腕, 手, 表情
+// 2%のブレンドは「アンビエントモーション」: 完全静止による人形感を避け、呼吸感を残す
+let basePose = null;           // { boneName: THREE.Quaternion }
+let basePoseHipsPos = null;    // THREE.Vector3
+let poseLockEnabled = false;
+const AMBIENT_BLEND = 0.02;    // 固定ボーンに漏らすトラッキング量(2%)
+const POSE_LOCKED_BONES = new Set([
+  'Hips', 'Spine', 'Chest', 'UpperChest',
+  'LeftUpperLeg', 'LeftLowerLeg', 'LeftFoot', 'LeftToes',
+  'RightUpperLeg', 'RightLowerLeg', 'RightFoot', 'RightToes'
+]);
+
+document.getElementById('poseInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const bd = data.BoneDefinition;
+      if (!bd) throw new Error('BoneDefinitionが見つかりません(.vroidpose形式ではない可能性)');
+      basePose = {};
+      for (const boneName in bd) {
+        const q = bd[boneName];
+        if (q && typeof q.w === 'number') {
+          basePose[boneName] = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+        }
+      }
+      if (bd.HipsPosition) {
+        basePoseHipsPos = new THREE.Vector3(bd.HipsPosition.x, bd.HipsPosition.y, bd.HipsPosition.z);
+      }
+      log(`ポーズ読み込み完了: ${file.name} (${Object.keys(basePose).length}ボーン)`);
+      document.getElementById('btnPoseLock').disabled = false;
+      applyBasePoseOnce();
+    } catch (err) {
+      log(`ポーズ読み込みエラー: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+});
+
+function applyBasePoseOnce() {
+  if (!currentVRM || !basePose) return;
+  for (const boneName in basePose) {
+    const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[boneName];
+    if (Bone === undefined) continue;
+    const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+    if (node) node.quaternion.copy(basePose[boneName]);
+  }
+  if (basePoseHipsPos) {
+    const hipsNode = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(THREE_VRM.VRMSchema.HumanoidBoneName.Hips);
+    if (hipsNode) hipsNode.position.copy(basePoseHipsPos);
+  }
+  log('ベースポーズを適用しました');
+}
+
+document.getElementById('btnPoseLock').addEventListener('click', (e) => {
+  poseLockEnabled = !poseLockEnabled;
+  e.target.textContent = `ポーズ固定: ${poseLockEnabled ? 'オン' : 'オフ'}`;
+  if (poseLockEnabled) {
+    applyBasePoseOnce();
+    log('ポーズ固定オン: 腰から下+体幹はポーズ維持(2%だけ動きが乗ります)、上半身と表情はトラッキング');
+  } else {
+    log('ポーズ固定オフ: 全身トラッキングに戻りました');
+  }
+});
+
+// ポーズ固定中、固定対象ボーンをベースポーズへ引き戻す(毎フレーム描画ループから呼ばれる)
+function enforceBasePose() {
+  if (!poseLockEnabled || !currentVRM || !basePose) return;
+  for (const boneName of POSE_LOCKED_BONES) {
+    const q = basePose[boneName];
+    if (!q) continue;
+    const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[boneName];
+    if (Bone === undefined) continue;
+    const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+    if (!node) continue;
+    // トラッキングが書き込んだ現在値から、ベースポーズへ(1-AMBIENT_BLEND)だけ引き戻す
+    // → 結果的にポーズ98% + トラッキング2%のブレンドになる
+    node.quaternion.slerp(q, 1 - AMBIENT_BLEND);
+  }
+  if (basePoseHipsPos) {
+    const hipsNode = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(THREE_VRM.VRMSchema.HumanoidBoneName.Hips);
+    if (hipsNode) hipsNode.position.lerp(basePoseHipsPos, 1 - AMBIENT_BLEND);
+  }
+}
 
 // ---------- VRM loading ----------
 const gltfLoader = new THREE.GLTFLoader();
