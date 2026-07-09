@@ -3,657 +3,153 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VRM モーションキャプチャ MVP - 技術検証</title>
+<title>VRM モーションスタジオ - 使い方ガイド</title>
 <style>
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
     background: #16181d;
-    color: #e8e8e8;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    overflow: hidden;
+    color: #d8dade;
+    line-height: 1.9;
   }
-  header {
-    padding: 10px 16px;
-    background: #1e2128;
-    border-bottom: 1px solid #2c3038;
+  .wrap { max-width: 780px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 {
+    font-size: 26px; margin: 8px 0 4px; color: #fff; letter-spacing: 0.02em;
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; color: #8fd3c7; }
-  header p { font-size: 12px; margin: 4px 0 0; color: #8a8f98; }
-  main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+  .tagline { color: #8a8f98; font-size: 14px; margin-bottom: 28px; }
+  h2 {
+    font-size: 18px; margin: 44px 0 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #2c3038; color: #fff;
   }
-  #viewport-wrap {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    background: #0c0d10;
+  h3 { font-size: 15px; margin: 24px 0 6px; color: #e8e8e8; }
+  p { margin: 8px 0; font-size: 14.5px; }
+  .apps { display: flex; flex-direction: column; gap: 14px; margin: 20px 0; }
+  .app-card {
+    display: block; text-decoration: none; border-radius: 12px; padding: 18px 20px;
+    border: 1px solid #2c3038; background: #1c1f26; transition: background 0.15s;
   }
-  #canvas { display: block; width: 100%; height: 100%; }
-  video#videoInput { display: none; }
-  #controls {
-    padding: 10px 12px;
-    background: #1e2128;
-    border-top: 1px solid #2c3038;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
+  .app-card:active { background: #262a33; }
+  .app-card .name { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .app-card .desc { font-size: 13.5px; color: #9aa0aa; }
+  .app-card.rec .name { color: #8fd3c7; }
+  .app-card.ext .name { color: #8fb3d3; }
+  .app-card.ply .name { color: #d3a98f; }
+  .flow {
+    background: #1c1f26; border: 1px solid #2c3038; border-radius: 12px;
+    padding: 16px 20px; margin: 16px 0; font-size: 14px;
   }
-  button, label.file-btn {
-    background: #2c3038;
-    color: #e8e8e8;
-    border: 1px solid #3a3f4a;
-    border-radius: 6px;
-    padding: 9px 14px;
-    font-size: 13px;
-    cursor: pointer;
-    white-space: nowrap;
+  .flow b { color: #fff; }
+  ol, ul { padding-left: 22px; font-size: 14.5px; }
+  li { margin: 6px 0; }
+  .tip {
+    background: #23282f; border-left: 3px solid #8fd3c7; border-radius: 0 8px 8px 0;
+    padding: 10px 14px; margin: 14px 0; font-size: 13.5px; color: #b8bdc6;
   }
-  button:active, label.file-btn:active { background: #3a3f4a; }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  button.rec { background: #7a2b2b; border-color: #a33; }
-  button.stop { background: #7a5a1f; border-color: #b8860b; }
-  button.play { background: #1f5a3a; border-color: #2f8f5e; }
-  input[type=file] { display: none; }
-  #status {
-    font-size: 11px;
-    color: #8a8f98;
-    padding: 4px 4px 0;
-    display: flex;
-    justify-content: space-between;
+  .warn {
+    background: #2a2530; border-left: 3px solid #d3a98f; border-radius: 0 8px 8px 0;
+    padding: 10px 14px; margin: 14px 0; font-size: 13.5px; color: #c6bdb8;
   }
-  #downloadLinks {
-    padding: 8px 12px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .kbd {
+    background: #2c3038; border-radius: 4px; padding: 1px 7px; font-size: 12.5px;
+    color: #e8e8e8; white-space: nowrap;
   }
-  #downloadLinks a {
-    display: inline-block;
-    background: #2f8f5e;
-    color: #fff;
-    text-decoration: none;
-    font-size: 13px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-align: center;
-  }
-  #log {
-    height: 90px;
-    overflow-y: auto;
-    background: #0c0d10;
-    border-top: 1px solid #2c3038;
-    padding: 6px 12px;
-    font-family: "SF Mono", monospace;
-    font-size: 11px;
-    color: #7fb890;
-    line-height: 1.5;
-  }
-  #log div { white-space: pre-wrap; word-break: break-all; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:#555; }
-  .dot.on { background:#e05252; }
+  .toc { font-size: 14px; }
+  .toc a { color: #8fb3d3; text-decoration: none; }
+  footer { margin-top: 60px; font-size: 12px; color: #5a5f68; text-align: center; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<header>
-  <h1>VRM モーションキャプチャ MVP
-    <span style="float:right;font-weight:normal;font-size:12px;">
-      <a href="extract.html" style="color:#8fb3d3;margin-left:10px;">動画抽出</a>
-      <a href="player.html" style="color:#d3a98f;margin-left:10px;">プレイヤー</a>
-      <a href="manual.html" style="color:#9aa0aa;margin-left:10px;">使い方</a>
-    </span>
-  </h1>
-  <p>技術検証:トラッキングデータ + 音声を記録 → カメラなしで再生 → 同じ動きが再現されるか確認</p>
-</header>
+  <h1>VRM モーションスタジオ</h1>
+  <p class="tagline">iPadだけで完結する、VRMモデルのモーションキャプチャ・収録・仕上げツール</p>
 
-<main>
-  <div id="viewport-wrap">
-    <canvas id="canvas"></canvas>
-    <video id="videoInput" playsinline></video>
+  <div class="apps">
+    <a class="app-card rec" href="record.html">
+      <div class="name">① リアルタイム収録</div>
+      <div class="desc">カメラで顔・全身・手指をその場でキャプチャ。ベースポーズとのブレンドもここ。リハーサルや手軽な収録に。</div>
+    </a>
+    <a class="app-card ext" href="extract.html">
+      <div class="name">② 動画から抽出</div>
+      <div class="desc">撮影済み動画を1フレームずつ最高精度で解析。時間はかかるが本番品質のモーションが欲しい時に。</div>
+    </a>
+    <a class="app-card ply" href="player.html">
+      <div class="name">③ プレイヤー(仕上げスタジオ)</div>
+      <div class="desc">保存したモーション+音声を読み込んで、ブレ補正・背景・カメラワークを付けて再生。</div>
+    </a>
   </div>
 
-  <div id="status">
-    <span><span id="recDot" class="dot"></span><span id="statusText">未初期化</span></span>
-    <span id="frameCount">frames: 0</span>
+  <h2>全体の流れ</h2>
+  <div class="flow">
+    <b>収録する</b>(①リアルタイム or ②動画から)<br>
+    ↓ モーションJSON + 音声ファイルを保存<br>
+    <b>仕上げる</b>(③プレイヤー)<br>
+    ↓ ブレ補正 → 背景・カメラを決めて再生<br>
+    <b>画面収録などで映像化</b>
   </div>
+  <p>ポイントは「動画として録画する」のではなく「<b>動きのデータ(JSON)と音声を別々に保存する</b>」こと。あとから別のモデルに同じ演技をさせたり、カメラアングルだけ変えたりできます。</p>
 
-  <div id="controls">
-    <label class="file-btn">
-      VRM読み込み
-      <input type="file" id="vrmInput" accept=".vrm">
-    </label>
-    <button id="btnCamera">カメラ開始</button>
-    <button id="btnRec" class="rec" disabled>記録開始</button>
-    <button id="btnPlay" class="play" disabled>再生検証</button>
-    <button id="btnDownloadJson" disabled>JSON保存</button>
-    <button id="btnDownloadAudio" disabled>音声保存</button>
-    <label class="file-btn">
-      ポーズ読み込み
-      <input type="file" id="poseInput">
-    </label>
-    <button id="btnPoseLock" disabled>ポーズ固定: オフ</button>
-  </div>
+  <h2>① リアルタイム収録の使い方</h2>
+  <ol>
+    <li><span class="kbd">VRM読み込み</span> で自分のVRMモデルを選ぶ</li>
+    <li><span class="kbd">カメラ開始</span> をタップ(カメラ・マイクの許可を求められたら許可)</li>
+    <li>モデルが自分の動きに追従するのを確認</li>
+    <li><span class="kbd">記録開始</span> → 演技 → <span class="kbd">記録停止</span></li>
+    <li><span class="kbd">カメラ停止</span> してから保存すると動作が軽い</li>
+    <li><span class="kbd">JSON保存</span> → 画面の緑リンクをタップして保存</li>
+    <li><span class="kbd">音声保存</span> → 開いたページの共有アイコン(<span class="kbd">□↑</span>)→「"ファイル"に保存」</li>
+  </ol>
 
-  <div id="downloadLinks"></div>
-  <div id="log"></div>
-</main>
+  <h3>ベースポーズ機能(座り・壁もたれ等)</h3>
+  <ol>
+    <li>VRoid Studioなどで作った <span class="kbd">.vroidpose</span> ファイルを <span class="kbd">ポーズ読み込み</span> で選ぶ</li>
+    <li><span class="kbd">ポーズ固定: オン</span> にすると、腰から下と体幹はポーズを保ち、頭・腕・手・表情だけがトラッキングに追従</li>
+    <li>固定部分にも2%だけ体の揺らぎが乗るので、静止画のような不自然さが出にくい設計</li>
+  </ol>
+  <div class="tip">カメラに全身が映らない「座って収録」でも、脚が暴れなくなります。負荷軽減にも効果あり。</div>
 
-<!-- Three.js + three-vrm (legacy 0.x API, matches original Kalidoface-style demos) -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+  <h2>② 動画から抽出の使い方</h2>
+  <ol>
+    <li>iPad標準カメラなどで演技を撮影しておく(音声も動画に入れてOK)</li>
+    <li><span class="kbd">VRM読み込み</span> → <span class="kbd">動画読み込み</span></li>
+    <li><span class="kbd">解析FPS</span> をタップで切り替え(15が標準。数字が大きいほど滑らかだが処理時間増)</li>
+    <li><span class="kbd">解析開始</span> → プログレスバーが100%になるまで待つ</li>
+    <li><span class="kbd">モーション保存</span> / <span class="kbd">音声保存</span>(音声は動画内蔵の音をWAV化)</li>
+  </ol>
+  <div class="warn">解析は動画の実時間より長くかかります(最高精度設定のため)。まず数秒の短い動画で試すのがおすすめ。</div>
 
-<!-- MediaPipe Holistic (顔+全身+手指) -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <h2>③ プレイヤーの使い方</h2>
+  <ol>
+    <li><span class="kbd">VRM読み込み</span> → <span class="kbd">モーション読み込み</span>(保存したJSON) → <span class="kbd">音声読み込み</span></li>
+    <li><span class="kbd">ブレ補正を適用</span>:手足のプルつき・一瞬の跳ねを除去(強度スライダーで調整、3が標準)</li>
+    <li><span class="kbd">再生</span> で音声と同期再生</li>
+    <li>カメラ操作:<b>1本指ドラッグ=回転 / ピンチ=ズーム / 2本指ドラッグ=移動</b></li>
+    <li>背景:画像読み込み・色指定・<span class="kbd">グリーンバック</span>(クロマキー合成用)</li>
+  </ol>
+  <div class="tip">プレイヤーには関節可動域(ROM)制限が入っており、首や腰が人体としてあり得ない角度になるのを自動で防ぎます。まばたきも左右連動で整えられます(ウインクは残ります)。</div>
 
-<!-- KalidoKit -->
-<script src="https://cdn.jsdelivr.net/npm/kalidokit@1.1/dist/kalidokit.umd.js"></script>
+  <h2>こんな時は</h2>
+  <h3>ファイルを更新したのに変化がない</h3>
+  <p>Safariが古いページをキャッシュしています。URLの末尾に <span class="kbd">?v=2</span> のような文字を足して開き直してください(数字は毎回変える)。</p>
 
-<script>
-/* ============================================================
-   NOTE (技術検証の前提):
-   CDNバージョン・APIの細部(特にKalidoKitの出力プロパティ名、
-   three-vrmのボーン/ブレンドシェイプAPI)は、実機で1回動かして
-   ズレを確認しながら微調整する前提のドラフトです。
-   まずは「記録→再生で同じ動きが再現されるか」の骨格を検証してください。
-   ============================================================ */
+  <h3>保存ボタンを押しても保存されない</h3>
+  <p>JSONは画面に出る<b>緑のリンクをタップ</b>。音声は開いたページで<b>共有アイコン→「"ファイル"に保存」</b>。保存先は「ファイル」アプリのダウンロード(または指定したフォルダ)です。</p>
 
-const logEl = document.getElementById('log');
-const statusText = document.getElementById('statusText');
-const recDot = document.getElementById('recDot');
-const frameCountEl = document.getElementById('frameCount');
+  <h3>モデルが後ろを向いている</h3>
+  <p>VRM0.x形式の仕様です。このスタジオの各アプリは自動で正面に直しています。もし後ろ向きになる場合はページを再読み込みしてください。</p>
 
-function log(msg) {
-  const d = document.createElement('div');
-  const time = new Date().toLocaleTimeString();
-  d.textContent = `[${time}] ${msg}`;
-  logEl.appendChild(d);
-  logEl.scrollTop = logEl.scrollHeight;
-  console.log(msg);
-}
-// iPadでは開発者コンソールが見えないため、JSエラーを画面ログに出す
-window.addEventListener('error', (e) => {
-  log(`⚠ JSエラー: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`);
-});
-window.addEventListener('unhandledrejection', (e) => {
-  log(`⚠ 非同期エラー: ${e.reason && e.reason.message ? e.reason.message : e.reason}`);
-});
-function setStatus(s) { statusText.textContent = s; }
+  <h3>動きがおかしい・ボタンが反応しない</h3>
+  <p>画面下のログに <span class="kbd">⚠ JSエラー</span> が出ていないか確認。出ていたらその文言がそのまま原因調査の手がかりになります。</p>
 
-// ---------- Three.js setup ----------
-const canvas = document.getElementById('canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-const scene = new THREE.Scene();
-const camera3d = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
-camera3d.position.set(0, 1.4, 2.2);
-camera3d.lookAt(0, 1.3, 0);
+  <h2>データの考え方(このスタジオの設計思想)</h2>
+  <ul>
+    <li><b>収録は生データ</b>:記録されるJSONは補正前の素の動き。何度でも後から作り直せる</li>
+    <li><b>品質は後段で作る</b>:ブレ補正・可動域制限・まばたき整形はプレイヤー側で再生時に適用</li>
+    <li><b>モデルと演技の分離</b>:同じJSONを別のVRMに読ませれば、同じ演技を別キャラで再現できる</li>
+  </ul>
 
-const light = new THREE.DirectionalLight(0xffffff, 1.2);
-light.position.set(1, 1, 1);
-scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-
-function resizeRenderer() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  renderer.setSize(w, h, false);
-  camera3d.aspect = w / h;
-  camera3d.updateProjectionMatrix();
-}
-window.addEventListener('resize', resizeRenderer);
-
-let currentVRM = null;
-const clock = new THREE.Clock();
-let blinkLSmooth = 0, blinkRSmooth = 0;
-
-// ベースポーズ関連の状態(animate()より前に宣言が必要)
-let basePose = null;           // { boneName: THREE.Quaternion }
-let basePoseHipsPos = null;    // THREE.Vector3
-let poseLockEnabled = false;
-const AMBIENT_BLEND = 0.02;    // 固定ボーンに漏らすトラッキング量(2%)
-const POSE_LOCKED_BONES = new Set([
-  'Hips', 'Spine', 'Chest', 'UpperChest',
-  'LeftUpperLeg', 'LeftLowerLeg', 'LeftFoot', 'LeftToes',
-  'RightUpperLeg', 'RightLowerLeg', 'RightFoot', 'RightToes'
-]);
-
-function animate() {
-  requestAnimationFrame(animate);
-  resizeRenderer();
-  const delta = clock.getDelta();
-  if (typeof enforceBasePose === 'function') enforceBasePose();
-  if (currentVRM) currentVRM.update(delta);
-  renderer.render(scene, camera3d);
-}
-animate();
-
-// ---------- ベースポーズ (.vroidpose) ----------
-// ポーズ固定中の役割分担:
-//   固定(98%ポーズ+2%トラッキング): Hips, Spine, Chest, 両脚
-//   トラッキング: Head, Neck, 肩, 腕, 手, 表情
-// 2%のブレンドは「アンビエントモーション」: 完全静止による人形感を避け、呼吸感を残す
-// (状態変数はファイル前半、animate()より前で宣言済み)
-
-document.getElementById('poseInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(reader.result);
-      const bd = data.BoneDefinition;
-      if (!bd) throw new Error('BoneDefinitionが見つかりません(.vroidpose形式ではない可能性)');
-      basePose = {};
-      for (const boneName in bd) {
-        const q = bd[boneName];
-        if (q && typeof q.w === 'number') {
-          basePose[boneName] = new THREE.Quaternion(q.x, q.y, q.z, q.w);
-        }
-      }
-      if (bd.HipsPosition) {
-        basePoseHipsPos = new THREE.Vector3(bd.HipsPosition.x, bd.HipsPosition.y, bd.HipsPosition.z);
-      }
-      log(`ポーズ読み込み完了: ${file.name} (${Object.keys(basePose).length}ボーン)`);
-      document.getElementById('btnPoseLock').disabled = false;
-      applyBasePoseOnce();
-    } catch (err) {
-      log(`ポーズ読み込みエラー: ${err.message}`);
-    }
-  };
-  reader.readAsText(file);
-});
-
-function applyBasePoseOnce() {
-  if (!currentVRM || !basePose) return;
-  for (const boneName in basePose) {
-    const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[boneName];
-    if (Bone === undefined) continue;
-    const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
-    if (node) node.quaternion.copy(basePose[boneName]);
-  }
-  if (basePoseHipsPos) {
-    const hipsNode = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(THREE_VRM.VRMSchema.HumanoidBoneName.Hips);
-    if (hipsNode) hipsNode.position.copy(basePoseHipsPos);
-  }
-  log('ベースポーズを適用しました');
-}
-
-document.getElementById('btnPoseLock').addEventListener('click', (e) => {
-  poseLockEnabled = !poseLockEnabled;
-  e.target.textContent = `ポーズ固定: ${poseLockEnabled ? 'オン' : 'オフ'}`;
-  if (poseLockEnabled) {
-    applyBasePoseOnce();
-    log('ポーズ固定オン: 腰から下+体幹はポーズ維持(2%だけ動きが乗ります)、上半身と表情はトラッキング');
-  } else {
-    log('ポーズ固定オフ: 全身トラッキングに戻りました');
-  }
-});
-
-// ポーズ固定中、固定対象ボーンをベースポーズへ引き戻す(毎フレーム描画ループから呼ばれる)
-function enforceBasePose() {
-  if (!poseLockEnabled || !currentVRM || !basePose) return;
-  for (const boneName of POSE_LOCKED_BONES) {
-    const q = basePose[boneName];
-    if (!q) continue;
-    const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[boneName];
-    if (Bone === undefined) continue;
-    const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
-    if (!node) continue;
-    // トラッキングが書き込んだ現在値から、ベースポーズへ(1-AMBIENT_BLEND)だけ引き戻す
-    // → 結果的にポーズ98% + トラッキング2%のブレンドになる
-    node.quaternion.slerp(q, 1 - AMBIENT_BLEND);
-  }
-  if (basePoseHipsPos) {
-    const hipsNode = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(THREE_VRM.VRMSchema.HumanoidBoneName.Hips);
-    if (hipsNode) hipsNode.position.lerp(basePoseHipsPos, 1 - AMBIENT_BLEND);
-  }
-}
-
-// ---------- VRM loading ----------
-const gltfLoader = new THREE.GLTFLoader();
-
-document.getElementById('vrmInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  log(`VRM読み込み中: ${file.name}`);
-  gltfLoader.load(url, (gltf) => {
-    THREE_VRM.VRM.from(gltf).then((vrm) => {
-      if (currentVRM) scene.remove(currentVRM.scene);
-      currentVRM = vrm;
-      scene.add(vrm.scene);
-      vrm.scene.rotation.y = Math.PI; // VRM0.x は後ろ向きでロードされるため180度回転
-      log('VRM読み込み完了');
-    }).catch(err => log(`VRM変換エラー: ${err.message}`));
-  }, undefined, (err) => log(`VRM読み込みエラー: ${err.message || err}`));
-});
-
-// ---------- Face rig application ----------
-function rigRotation(name, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
-  if (!currentVRM) return;
-  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
-  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
-  if (!node) return;
-  const euler = new THREE.Euler(
-    rotation.x * dampener,
-    rotation.y * dampener,
-    rotation.z * dampener,
-    'XYZ'
-  );
-  const quat = new THREE.Quaternion().setFromEuler(euler);
-  node.quaternion.slerp(quat, lerpAmount);
-}
-
-function setBlendShape(presetName, value, lerpAmount = 0.4) {
-  if (!currentVRM || !currentVRM.blendShapeProxy) return;
-  const preset = THREE_VRM.VRMSchema.BlendShapePresetName[presetName];
-  if (preset === undefined) return;
-  const current = currentVRM.blendShapeProxy.getValue(preset) || 0;
-  const next = current + (value - current) * lerpAmount;
-  currentVRM.blendShapeProxy.setValue(preset, next);
-}
-
-function applyFaceRig(riggedFace) {
-  if (!currentVRM || !riggedFace) return;
-  // 頭の向き
-  rigRotation('Neck', { x: riggedFace.head.x * 0.5, y: riggedFace.head.y * 0.5, z: riggedFace.head.z * 0.5 }, 0.7, 0.4);
-  rigRotation('Head', riggedFace.head, 0.7, 0.4);
-
-  // まばたき (Kalidokit: eye.l / eye.r は開き具合。1に近いほど開いている想定 → 閉じ量に変換)
-  const blinkLRaw = Math.max(0, Math.min(1, 1 - riggedFace.eye.l));
-  const blinkRRaw = Math.max(0, Math.min(1, 1 - riggedFace.eye.r));
-  // ノイズ対策1: なめらか化(指数移動平均)。数値を下げるほど滑らかだが反応も遅くなる
-  blinkLSmooth += (blinkLRaw - blinkLSmooth) * 0.2;
-  blinkRSmooth += (blinkRRaw - blinkRSmooth) * 0.2;
-  // ノイズ対策2: 不感帯。小さい揺れは0に丸めて「閉じてないのにピクつく」のを防ぐ
-  const blinkL = blinkLSmooth < 0.15 ? 0 : blinkLSmooth;
-  const blinkR = blinkRSmooth < 0.15 ? 0 : blinkRSmooth;
-  setBlendShape('BlinkL', blinkL, 1);
-  setBlendShape('BlinkR', blinkR, 1);
-
-  // 口の形 (母音シェイプ)
-  if (riggedFace.mouth && riggedFace.mouth.shape) {
-    setBlendShape('A', riggedFace.mouth.shape.A);
-    setBlendShape('I', riggedFace.mouth.shape.I);
-    setBlendShape('U', riggedFace.mouth.shape.U);
-    setBlendShape('E', riggedFace.mouth.shape.E);
-    setBlendShape('O', riggedFace.mouth.shape.O);
-  }
-}
-
-function rigPosition(name, position = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmount = 0.3) {
-  if (!currentVRM) return;
-  const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[name];
-  const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
-  if (!node) return;
-  const vector = new THREE.Vector3(position.x * dampener, position.y * dampener, position.z * dampener);
-  node.position.lerp(vector, lerpAmount);
-}
-
-function applyPoseRig(riggedPose) {
-  if (!currentVRM || !riggedPose) return;
-  rigRotation('Hips', riggedPose.Hips.rotation, 0.7, 0.3);
-  rigPosition('Hips', {
-    x: riggedPose.Hips.position.x,
-    y: riggedPose.Hips.position.y + 1,
-    z: -riggedPose.Hips.position.z
-  }, 1, 0.07);
-
-  rigRotation('Chest', riggedPose.Spine, 0.25, 0.3);
-  rigRotation('Spine', riggedPose.Spine, 0.45, 0.3);
-
-  rigRotation('RightUpperArm', riggedPose.RightUpperArm, 1, 0.3);
-  rigRotation('RightLowerArm', riggedPose.RightLowerArm, 1, 0.3);
-  rigRotation('LeftUpperArm', riggedPose.LeftUpperArm, 1, 0.3);
-  rigRotation('LeftLowerArm', riggedPose.LeftLowerArm, 1, 0.3);
-
-  rigRotation('LeftUpperLeg', riggedPose.LeftUpperLeg, 1, 0.3);
-  rigRotation('LeftLowerLeg', riggedPose.LeftLowerLeg, 1, 0.3);
-  rigRotation('RightUpperLeg', riggedPose.RightUpperLeg, 1, 0.3);
-  rigRotation('RightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
-}
-
-function clampRotation(rotation, maxRad) {
-  return {
-    x: Math.max(-maxRad, Math.min(maxRad, rotation.x)),
-    y: Math.max(-maxRad, Math.min(maxRad, rotation.y)),
-    z: Math.max(-maxRad, Math.min(maxRad, rotation.z))
-  };
-}
-
-function applyHandRig(riggedHand, side) {
-  if (!currentVRM || !riggedHand) return;
-  for (const key in riggedHand) {
-    // KalidokitはWrist、VRMはHandという名前なので変換
-    const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
-    // 手首・指があり得ない角度に行かないよう制限(手首は約57度、指の関節は約80度まで)
-    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
-    const clamped = clampRotation(riggedHand[key], maxRad);
-    rigRotation(boneKey, clamped, 1, 0.3);
-  }
-}
-
-// ---------- MediaPipe Holistic ----------
-const videoInput = document.getElementById('videoInput');
-let holistic = null;
-let cameraUtil = null;
-let cameraStarted = false;
-
-let recording = false;
-let frames = [];
-let startTime = 0;
-
-function onHolisticResults(results) {
-  let currentFace = null, currentPose = null, currentLH = null, currentRH = null;
-
-  if (results.faceLandmarks) {
-    currentFace = Kalidokit.Face.solve(results.faceLandmarks, { runtime: 'mediapipe', video: videoInput });
-    if (currentFace) applyFaceRig(currentFace);
-  }
-
-  const poseLm3d = results.za || results.poseWorldLandmarks;
-  if (poseLm3d && results.poseLandmarks) {
-    currentPose = Kalidokit.Pose.solve(poseLm3d, results.poseLandmarks, { runtime: 'mediapipe', video: videoInput, enableLegs: true });
-    if (currentPose) applyPoseRig(currentPose);
-  }
-
-  if (results.rightHandLandmarks) {
-    currentRH = Kalidokit.Hand.solve(results.rightHandLandmarks, 'Right');
-    if (currentRH) applyHandRig(currentRH, 'Right');
-  }
-  if (results.leftHandLandmarks) {
-    currentLH = Kalidokit.Hand.solve(results.leftHandLandmarks, 'Left');
-    if (currentLH) applyHandRig(currentLH, 'Left');
-  }
-
-  if (recording) {
-    frames.push({ t: performance.now() - startTime, face: currentFace, pose: currentPose, lh: currentLH, rh: currentRH });
-    frameCountEl.textContent = `frames: ${frames.length}`;
-  }
-}
-
-const btnCamera = document.getElementById('btnCamera');
-const btnRec = document.getElementById('btnRec');
-
-btnCamera.addEventListener('click', async () => {
-  // --- カメラ停止(トグル) ---
-  if (cameraStarted) {
-    if (recording) { log('記録中はカメラを停止できません。先に記録を停止してください。'); return; }
-    try {
-      if (cameraUtil) { await cameraUtil.stop(); cameraUtil = null; }
-      if (holistic) { holistic.close(); holistic = null; }
-    } catch (err) { /* stop時のエラーは無視 */ }
-    cameraStarted = false;
-    btnCamera.textContent = 'カメラ開始';
-    btnRec.disabled = true;
-    setStatus('カメラ停止中(保存などの操作はこの状態が軽量です)');
-    log('カメラ停止');
-    return;
-  }
-
-  // --- カメラ開始 ---
-  try {
-    setStatus('カメラ準備中...');
-    holistic = new Holistic({
-      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
-    });
-    holistic.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      refineFaceLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    holistic.onResults(onHolisticResults);
-
-    cameraUtil = new Camera(videoInput, {
-      onFrame: async () => { if (holistic) await holistic.send({ image: videoInput }); },
-      width: 640,
-      height: 480
-    });
-    await cameraUtil.start();
-    cameraStarted = true;
-    btnCamera.textContent = 'カメラ停止';
-    setStatus('カメラ稼働中(全身+手指トラッキング中)');
-    log('カメラ開始(顔+全身+手指)');
-    btnRec.disabled = false;
-  } catch (err) {
-    log(`カメラエラー: ${err.message}`);
-    setStatus('カメラエラー');
-  }
-});
-
-// ---------- Audio recording ----------
-let mediaRecorder = null;
-let audioChunks = [];
-let audioBlob = null;
-
-async function startAudioRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
-    audioChunks = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      const mime = mediaRecorder.mimeType || 'audio/webm';
-      audioBlob = new Blob(audioChunks, { type: mime });
-      document.getElementById('btnDownloadAudio').disabled = false;
-      log(`音声保存完了 (${(audioBlob.size / 1024).toFixed(1)} KB, ${mime})`);
-    };
-    mediaRecorder.start();
-  } catch (err) {
-    log(`マイクエラー: ${err.message}`);
-  }
-}
-function stopAudioRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-}
-
-// ---------- Recording controls (トグル) ----------
-btnRec.addEventListener('click', () => {
-  // --- 記録停止 ---
-  if (recording) {
-    recording = false;
-    recDot.classList.remove('on');
-    stopAudioRecording();
-    btnRec.textContent = '記録開始';
-    setStatus(cameraStarted ? 'カメラ稼働中(全身+手指トラッキング中)' : '待機中');
-    log(`記録停止: ${frames.length} フレーム。カメラを停止してから保存すると軽量です。`);
-    document.getElementById('btnPlay').disabled = frames.length === 0;
-    document.getElementById('btnDownloadJson').disabled = frames.length === 0;
-    return;
-  }
-
-  // --- 記録開始 ---
-  frames = [];
-  startTime = performance.now();
-  recording = true;
-  recDot.classList.add('on');
-  btnRec.textContent = '記録停止';
-  setStatus('記録中...');
-  frameCountEl.textContent = 'frames: 0';
-  startAudioRecording();
-  log('記録開始');
-  document.getElementById('btnPlay').disabled = true;
-});
-
-// ---------- Playback ----------
-let playbackActive = false;
-
-document.getElementById('btnPlay').addEventListener('click', () => {
-  if (!frames.length) { log('再生できるフレームがありません'); return; }
-  playbackActive = true;
-  setStatus('再生検証中...');
-  log('再生開始(カメラ入力なし、記録データのみで再現)');
-
-  let audioEl = null;
-  if (audioBlob) {
-    audioEl = new Audio(URL.createObjectURL(audioBlob));
-    audioEl.play().catch(err => log(`音声再生エラー: ${err.message}`));
-  }
-
-  const playStart = performance.now();
-  let idx = 0;
-
-  function step() {
-    if (!playbackActive) return;
-    const elapsed = performance.now() - playStart;
-    while (idx < frames.length && frames[idx].t <= elapsed) {
-      const f = frames[idx];
-      if (f.face) applyFaceRig(f.face);
-      if (f.pose) applyPoseRig(f.pose);
-      if (f.lh) applyHandRig(f.lh, 'Left');
-      if (f.rh) applyHandRig(f.rh, 'Right');
-      idx++;
-    }
-    if (idx < frames.length) {
-      requestAnimationFrame(step);
-    } else {
-      playbackActive = false;
-      setStatus(cameraStarted ? 'カメラ稼働中(顔トラッキング中)' : '待機中');
-      log('再生完了:最後まで再現されました');
-    }
-  }
-  step();
-});
-
-// ---------- Downloads ----------
-const downloadLinksEl = document.getElementById('downloadLinks');
-
-function showDownloadLink(url, filename, label) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.textContent = `⬇ ${label} (タップして保存: ${filename})`;
-  downloadLinksEl.appendChild(a);
-}
-
-document.getElementById('btnDownloadJson').addEventListener('click', () => {
-  const json = JSON.stringify(frames);
-  // data URLにすると、Safariがテキストページ表示ではなくダウンロードとして扱う
-  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
-  showDownloadLink(dataUrl, `tracking-${Date.now()}.json`, 'JSON');
-  log('JSONの保存リンクを表示しました。緑のリンクをタップしてください。');
-});
-
-document.getElementById('btnDownloadAudio').addEventListener('click', () => {
-  if (!audioBlob) { log('音声データがありません'); return; }
-  const ext = (audioBlob.type.split('/')[1] || 'webm').split(';')[0];
-  const url = URL.createObjectURL(audioBlob);
-  window.open(url, '_blank');
-  log('音声を開きました。共有アイコン→「"ファイル"に保存」で保存してください。');
-  showDownloadLink(url, `audio-${Date.now()}.${ext}`, '音声');
-});
-
-log('準備完了。VRMを読み込んでからカメラを開始してください。');
-</script>
+  <footer>VRM Motion Studio — built with MediaPipe Holistic / KalidoKit / Three.js + three-vrm</footer>
+</div>
 </body>
 </html>
