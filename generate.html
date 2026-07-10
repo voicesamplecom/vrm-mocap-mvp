@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VRM モーション生成 - プロシージャル実験室</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #16181d;
+    color: #d8dade;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 20px; color: #c7a8e8; margin: 4px 0; }
+  .tagline { color: #8a8f98; font-size: 13px; margin-bottom: 20px; }
+  .nav { font-size: 12px; margin-bottom: 16px; }
+  .nav a { text-decoration: none; margin-right: 12px; }
+  .panel {
+    background: #1c1f26; border: 1px solid #2c3038; border-radius: 12px;
+    padding: 18px 20px; margin: 14px 0;
+  }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; color: #fff; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 12px 0; font-size: 14px; }
+  .row label { flex: 1; }
+  .row .val { width: 52px; text-align: right; color: #c7a8e8; font-family: "SF Mono", monospace; font-size: 13px; }
+  input[type=range] { width: 45%; }
+  button {
+    background: #4a3a6b; color: #fff; border: 1px solid #7a5fae; border-radius: 8px;
+    padding: 12px 18px; font-size: 15px; cursor: pointer; width: 100%; margin-top: 8px;
+  }
+  button:active { background: #5a4a7b; }
+  #downloadLinks { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  #downloadLinks a {
+    display: block; background: #2f8f5e; color: #fff; text-decoration: none;
+    font-size: 14px; padding: 12px; border-radius: 8px; text-align: center;
+  }
+  .note { font-size: 12.5px; color: #8a8f98; line-height: 1.7; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav">
+    <a href="./" style="color:#9aa0aa;">使い方</a>
+    <a href="record.html" style="color:#8fd3c7;">リアルタイム収録</a>
+    <a href="extract.html" style="color:#8fb3d3;">動画抽出</a>
+    <a href="player.html" style="color:#d3a98f;">プレイヤー</a>
+  </div>
+
+  <h1>モーション生成(実験)</h1>
+  <p class="tagline">数式からアイドル(待機)モーションを合成 → player.htmlで再生できるJSONを書き出し</p>
+
+  <div class="panel">
+    <h2>パラメータ</h2>
+    <div class="row">
+      <label>長さ(秒)</label>
+      <input type="range" id="pDuration" min="5" max="60" step="5" value="20">
+      <span class="val" id="vDuration">20</span>
+    </div>
+    <div class="row">
+      <label>呼吸の速さ(回/分)</label>
+      <input type="range" id="pBreath" min="8" max="24" step="1" value="14">
+      <span class="val" id="vBreath">14</span>
+    </div>
+    <div class="row">
+      <label>体の揺れの大きさ</label>
+      <input type="range" id="pSway" min="0" max="10" step="1" value="4">
+      <span class="val" id="vSway">4</span>
+    </div>
+    <div class="row">
+      <label>まばたき頻度(回/分)</label>
+      <input type="range" id="pBlink" min="4" max="30" step="1" value="15">
+      <span class="val" id="vBlink">15</span>
+    </div>
+    <div class="row">
+      <label>頭の動きの大きさ</label>
+      <input type="range" id="pHead" min="0" max="10" step="1" value="3">
+      <span class="val" id="vHead">3</span>
+    </div>
+    <button id="btnGenerate">生成してJSONを書き出す</button>
+    <div id="downloadLinks"></div>
+  </div>
+
+  <p class="note">
+    生成されるのは、呼吸(胸・背骨のわずかな伸縮)、重心の揺らぎ(腰の微回転)、自然な間隔のまばたき、頭の微動を合成した待機モーションです。
+    まばたきの間隔と頭の動きには乱数による「ゆらぎ」が入っており、同じ設定でも生成のたびに少しずつ違うモーションになります。
+    書き出したJSONはプレイヤーで読み込んで再生してください。
+  </p>
+</div>
+
+<script>
+// スライダー表示の連動
+for (const id of ['Duration','Breath','Sway','Blink','Head']) {
+  const input = document.getElementById('p'+id);
+  const label = document.getElementById('v'+id);
+  input.addEventListener('input', () => { label.textContent = input.value; });
+}
+
+const FPS = 30;
+
+// なめらかな乱数(パーリンノイズ風の簡易版): 複数のサイン波を無理数倍の周波数で重ねる
+function smoothNoise(t, seed) {
+  return (
+    Math.sin(t * 1.0 + seed * 12.9898) * 0.5 +
+    Math.sin(t * 2.618 + seed * 78.233) * 0.3 +
+    Math.sin(t * 4.236 + seed * 37.719) * 0.2
+  );
+}
+
+function generateMotion() {
+  const duration = parseFloat(document.getElementById('pDuration').value);
+  const breathPerMin = parseFloat(document.getElementById('pBreath').value);
+  const swayAmt = parseFloat(document.getElementById('pSway').value) / 10;   // 0..1
+  const blinkPerMin = parseFloat(document.getElementById('pBlink').value);
+  const headAmt = parseFloat(document.getElementById('pHead').value) / 10;   // 0..1
+
+  const breathHz = breathPerMin / 60;
+  const frames = [];
+  const totalFrames = Math.floor(duration * FPS);
+
+  // まばたきのタイミングを事前に決める(平均間隔±40%のゆらぎ)
+  const blinkTimes = [];
+  let tNext = 1 + Math.random();
+  const avgInterval = 60 / blinkPerMin;
+  while (tNext < duration) {
+    blinkTimes.push(tNext);
+    tNext += avgInterval * (0.6 + Math.random() * 0.8);
+  }
+  const BLINK_DUR = 0.15; // 1回のまばたきの長さ(秒)
+
+  for (let i = 0; i < totalFrames; i++) {
+    const t = i / FPS;
+
+    // --- 呼吸: 胸と背骨のわずかな前後 ---
+    const breath = Math.sin(t * Math.PI * 2 * breathHz);
+
+    // --- 重心の揺らぎ: 腰の微回転(ゆっくり、不規則) ---
+    const swayY = smoothNoise(t * 0.3, 1) * 0.06 * swayAmt;  // ひねり
+    const swayZ = smoothNoise(t * 0.25, 2) * 0.04 * swayAmt; // 側屈
+    const swayX = smoothNoise(t * 0.2, 3) * 0.03 * swayAmt;  // 前後
+
+    // --- 頭の微動 ---
+    const headX = smoothNoise(t * 0.4, 4) * 0.10 * headAmt + breath * 0.015;
+    const headY = smoothNoise(t * 0.3, 5) * 0.12 * headAmt;
+    const headZ = smoothNoise(t * 0.35, 6) * 0.06 * headAmt;
+
+    // --- まばたき: 該当時刻なら閉じる(サインカーブで開閉) ---
+    let blink = 0;
+    for (const bt of blinkTimes) {
+      if (t >= bt && t < bt + BLINK_DUR) {
+        blink = Math.sin(((t - bt) / BLINK_DUR) * Math.PI); // 0→1→0
+        break;
+      }
+    }
+    // Kalidokit形式では eye.l/r は「開き具合」(1=開いている)
+    const eyeOpen = 1 - blink;
+
+    frames.push({
+      t: Math.round(t * 1000),
+      face: {
+        head: { x: headX, y: headY, z: headZ },
+        eye: { l: eyeOpen, r: eyeOpen },
+        mouth: { shape: { A: 0, I: 0, U: 0, E: 0, O: 0 } }
+      },
+      pose: {
+        Hips: {
+          rotation: { x: swayX, y: swayY, z: swayZ },
+          position: { x: 0, y: 0, z: 0 }
+        },
+        Spine: { x: breath * 0.02 + swayX * 0.5, y: swayY * 0.6, z: swayZ * 0.6 },
+        RightUpperArm: { x: 0, y: 0, z: -1.15 + breath * 0.01 },
+        RightLowerArm: { x: 0, y: 0, z: -0.1 },
+        LeftUpperArm: { x: 0, y: 0, z: 1.15 - breath * 0.01 },
+        LeftLowerArm: { x: 0, y: 0, z: 0.1 },
+        RightUpperLeg: { x: 0, y: 0, z: 0 },
+        RightLowerLeg: { x: 0, y: 0, z: 0 },
+        LeftUpperLeg: { x: 0, y: 0, z: 0 },
+        LeftLowerLeg: { x: 0, y: 0, z: 0 }
+      },
+      lh: null,
+      rh: null
+    });
+  }
+  return frames;
+}
+
+document.getElementById('btnGenerate').addEventListener('click', () => {
+  const frames = generateMotion();
+  const json = JSON.stringify(frames);
+  const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = `generated-idle-${Date.now()}.json`;
+  a.textContent = `⬇ 生成モーション (タップして保存: ${(json.length / 1024).toFixed(0)}KB / ${frames.length}フレーム)`;
+  const links = document.getElementById('downloadLinks');
+  links.innerHTML = '';
+  links.appendChild(a);
+});
+</script>
+</body>
+</html>
