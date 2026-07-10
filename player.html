@@ -499,7 +499,8 @@ function applyHandRig(riggedHand, side) {
   if (!currentVRM || !riggedHand) return;
   for (const key in riggedHand) {
     const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
-    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
+    // 手首は回内・回外で±90度程度回るため制限は緩め(±約97度)、指の関節は±約80度
+    const maxRad = boneKey.endsWith('Hand') ? 1.7 : 1.4;
     rigRotation(boneKey, clampRotation(riggedHand[key], maxRad), 1, 0.3);
   }
 }
