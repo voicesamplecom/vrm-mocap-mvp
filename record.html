@@ -451,6 +451,7 @@ let recording = false;
 let frames = [];
 let startTime = 0;
 
+
 function onHolisticResults(results) {
   let currentFace = null, currentPose = null, currentLH = null, currentRH = null;
 
@@ -465,14 +466,15 @@ function onHolisticResults(results) {
     if (currentPose) applyPoseRig(currentPose);
   }
 
-  if (results.rightHandLandmarks) {
-    currentRH = Kalidokit.Hand.solve(results.rightHandLandmarks, 'Right');
-    if (currentRH) applyHandRig(currentRH, 'Right');
-  }
-  if (results.leftHandLandmarks) {
-    currentLH = Kalidokit.Hand.solve(results.leftHandLandmarks, 'Left');
-    if (currentLH) applyHandRig(currentLH, 'Left');
-  }
+// カメラは鏡像のため、検出ラベルと実際の左右は逆になる
+if (results.rightHandLandmarks) {
+  currentLH = Kalidokit.Hand.solve(results.rightHandLandmarks, 'Left');
+  if (currentLH) applyHandRig(currentLH, 'Left');
+}
+if (results.leftHandLandmarks) {
+  currentRH = Kalidokit.Hand.solve(results.leftHandLandmarks, 'Right');
+  if (currentRH) applyHandRig(currentRH, 'Right');
+}
 
   if (recording) {
     frames.push({ t: performance.now() - startTime, face: currentFace, pose: currentPose, lh: currentLH, rh: currentRH });
