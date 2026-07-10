@@ -435,7 +435,7 @@ function applyHandRig(riggedHand, side) {
     // KalidokitはWrist、VRMはHandという名前なので変換
     const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
     // 手首・指があり得ない角度に行かないよう制限(手首は約57度、指の関節は約80度まで)
-    const maxRad = boneKey.endsWith('Hand') ? 1.0 : 1.4;
+    const maxRad = boneKey.endsWith('Hand') ? 1.7 : 1.4;
     const clamped = clampRotation(riggedHand[key], maxRad);
     rigRotation(boneKey, clamped, 1, 0.3);
   }
