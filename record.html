@@ -448,6 +448,8 @@ function mirrorLandmarks(landmarks) {
   return landmarks.map(p => ({ ...p, x: 1 - p.x, z: -(p.z || 0) }));
 }
 
+
+
 // ---------- MediaPipe Holistic ----------
 const videoInput = document.getElementById('videoInput');
 let holistic = null;
