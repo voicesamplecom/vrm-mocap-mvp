@@ -78,6 +78,13 @@
       <input type="range" id="pHead" min="0" max="10" step="1" value="3">
       <span class="val" id="vHead">3</span>
     </div>
+    <div class="row" style="border-top:1px solid #2c3038;padding-top:14px;">
+      <label>ベースポーズ(.vroidpose)<br><span style="font-size:11.5px;color:#8a8f98;" id="poseStatus">未読み込み(棒立ちベース)</span></label>
+      <label style="flex:none;background:#2c3038;border:1px solid #3a3f4a;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;">
+        選択
+        <input type="file" id="poseInput" style="display:none;">
+      </label>
+    </div>
     <button id="btnGenerate">生成してJSONを書き出す</button>
     <div id="downloadLinks"></div>
   </div>
@@ -89,6 +96,7 @@
   </p>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script>
 // スライダー表示の連動
 for (const id of ['Duration','Breath','Sway','Blink','Head']) {
@@ -98,6 +106,48 @@ for (const id of ['Duration','Breath','Sway','Blink','Head']) {
 }
 
 const FPS = 30;
+
+// ---------- ベースポーズ (.vroidpose) ----------
+// クォータニオンをオイラー角(KalidoKit互換のプレーンオブジェクト)に変換して保持
+let basePoseEuler = null;
+
+document.getElementById('poseInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const bd = data.BoneDefinition;
+      if (!bd) throw new Error('BoneDefinitionが見つかりません');
+      basePoseEuler = {};
+      for (const boneName in bd) {
+        const q = bd[boneName];
+        if (q && typeof q.w === 'number') {
+          const euler = new THREE.Euler().setFromQuaternion(
+            new THREE.Quaternion(q.x, q.y, q.z, q.w), 'XYZ'
+          );
+          basePoseEuler[boneName] = { x: euler.x, y: euler.y, z: euler.z };
+        }
+      }
+      document.getElementById('poseStatus').textContent = `読み込み済み: ${file.name}`;
+      document.getElementById('poseStatus').style.color = '#8fd3c7';
+    } catch (err) {
+      document.getElementById('poseStatus').textContent = `エラー: ${err.message}`;
+      document.getElementById('poseStatus').style.color = '#d38f8f';
+    }
+  };
+  reader.readAsText(file);
+});
+
+// ベースポーズのオイラー角を取得(なければデフォルト値)
+function base(boneName, fallback) {
+  if (basePoseEuler && basePoseEuler[boneName]) return basePoseEuler[boneName];
+  return fallback;
+}
+function addRot(baseRot, dx, dy, dz) {
+  return { x: baseRot.x + dx, y: baseRot.y + dy, z: baseRot.z + dz };
+}
 
 // なめらかな乱数(パーリンノイズ風の簡易版): 複数のサイン波を無理数倍の周波数で重ねる
 function smoothNoise(t, seed) {
@@ -156,27 +206,32 @@ function generateMotion() {
     // Kalidokit形式では eye.l/r は「開き具合」(1=開いている)
     const eyeOpen = 1 - blink;
 
+    // デフォルト(棒立ち)の基準値。ベースポーズ読み込み時はそちらが優先される
+    const armDownR = { x: 0, y: 0, z: -1.15 };
+    const armDownL = { x: 0, y: 0, z: 1.15 };
+    const zero = { x: 0, y: 0, z: 0 };
+
     frames.push({
       t: Math.round(t * 1000),
       face: {
-        head: { x: headX, y: headY, z: headZ },
+        head: addRot(base('Head', zero), headX, headY, headZ),
         eye: { l: eyeOpen, r: eyeOpen },
         mouth: { shape: { A: 0, I: 0, U: 0, E: 0, O: 0 } }
       },
       pose: {
         Hips: {
-          rotation: { x: swayX, y: swayY, z: swayZ },
+          rotation: addRot(base('Hips', zero), swayX, swayY, swayZ),
           position: { x: 0, y: 0, z: 0 }
         },
-        Spine: { x: breath * 0.02 + swayX * 0.5, y: swayY * 0.6, z: swayZ * 0.6 },
-        RightUpperArm: { x: 0, y: 0, z: -1.15 + breath * 0.01 },
-        RightLowerArm: { x: 0, y: 0, z: -0.1 },
-        LeftUpperArm: { x: 0, y: 0, z: 1.15 - breath * 0.01 },
-        LeftLowerArm: { x: 0, y: 0, z: 0.1 },
-        RightUpperLeg: { x: 0, y: 0, z: 0 },
-        RightLowerLeg: { x: 0, y: 0, z: 0 },
-        LeftUpperLeg: { x: 0, y: 0, z: 0 },
-        LeftLowerLeg: { x: 0, y: 0, z: 0 }
+        Spine: addRot(base('Spine', zero), breath * 0.02 + swayX * 0.5, swayY * 0.6, swayZ * 0.6),
+        RightUpperArm: addRot(base('RightUpperArm', armDownR), 0, 0, breath * 0.01),
+        RightLowerArm: base('RightLowerArm', { x: 0, y: 0, z: -0.1 }),
+        LeftUpperArm: addRot(base('LeftUpperArm', armDownL), 0, 0, -breath * 0.01),
+        LeftLowerArm: base('LeftLowerArm', { x: 0, y: 0, z: 0.1 }),
+        RightUpperLeg: base('RightUpperLeg', zero),
+        RightLowerLeg: base('RightLowerLeg', zero),
+        LeftUpperLeg: base('LeftUpperLeg', zero),
+        LeftLowerLeg: base('LeftLowerLeg', zero)
       },
       lh: null,
       rh: null
