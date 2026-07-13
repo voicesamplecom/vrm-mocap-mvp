@@ -140,6 +140,7 @@
       <input type="file" id="poseInput">
     </label>
     <button id="btnPoseLock" disabled>ポーズ固定: オフ</button>
+    <button id="btnWristMode">手首軸: 0</button>
   </div>
 
   <div id="downloadLinks"></div>
@@ -430,6 +431,26 @@ function clampRotation(rotation, maxRad) {
   };
 }
 
+// ---------- 手首軸デバッグ ----------
+// ドライバー回し(前腕軸ひねり)が正しく反映される軸マッピングを実機で探すための切り替え
+// 正解が見つかったらその番号のパターンを恒久設定にする
+const WRIST_MODES = [
+  (r) => ({ x: r.x, y: r.y, z: r.z }),           // 0: そのまま
+  (r) => ({ x: -r.x, y: r.y, z: r.z }),          // 1: xだけ反転
+  (r) => ({ x: r.x, y: -r.y, z: r.z }),          // 2: yだけ反転
+  (r) => ({ x: r.x, y: r.y, z: -r.z }),          // 3: zだけ反転
+  (r) => ({ x: -r.x, y: -r.y, z: r.z }),         // 4: x,y反転
+  (r) => ({ x: -r.x, y: r.y, z: -r.z }),         // 5: x,z反転
+  (r) => ({ x: r.x, y: -r.y, z: -r.z }),         // 6: y,z反転
+  (r) => ({ x: -r.x, y: -r.y, z: -r.z })         // 7: 全反転
+];
+let wristMode = 0;
+document.getElementById('btnWristMode').addEventListener('click', (e) => {
+  wristMode = (wristMode + 1) % WRIST_MODES.length;
+  e.target.textContent = `手首軸: ${wristMode}`;
+  log(`手首軸モード: ${wristMode} (ドライバー回しの向きを確認してください)`);
+});
+
 function applyHandRig(riggedHand, side) {
   if (!currentVRM || !riggedHand) return;
   for (const key in riggedHand) {
@@ -437,7 +458,9 @@ function applyHandRig(riggedHand, side) {
     const boneKey = key === `${side}Wrist` ? `${side}Hand` : key;
     // 手首は回内・回外で±90度程度回るため制限は緩め(±約97度)、指の関節は±約80度
     const maxRad = boneKey.endsWith('Hand') ? 1.7 : 1.4;
-    rigRotation(boneKey, clampRotation(riggedHand[key], maxRad), 1, 0.3);
+    // 手首(Hand)ボーンのみ、デバッグ中の軸マッピングを適用
+    const r = boneKey.endsWith('Hand') ? WRIST_MODES[wristMode](riggedHand[key]) : riggedHand[key];
+    rigRotation(boneKey, clampRotation(r, maxRad), 1, 0.3);
   }
 }
 
@@ -447,8 +470,6 @@ function mirrorLandmarks(landmarks) {
   if (!landmarks) return landmarks;
   return landmarks.map(p => ({ ...p, x: 1 - p.x, z: -(p.z || 0) }));
 }
-
-
 
 // ---------- MediaPipe Holistic ----------
 const videoInput = document.getElementById('videoInput');
