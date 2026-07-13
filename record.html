@@ -441,11 +441,11 @@ function applyHandRig(riggedHand, side) {
   }
 }
 
-// 検出ランドマークを左右反転(x: 0..1 正規化座標を 1-x に)
-// カメラの鏡像をデータの時点で正像に直し、Kalidokitには本来の前提のまま解かせる
+// 検出ランドマークを左右反転(x: 0..1 正規化座標を 1-x に、z: 奥行きも符号反転)
+// カメラの鏡像をデータの時点で完全な正像に直し、Kalidokitには本来の前提のまま解かせる
 function mirrorLandmarks(landmarks) {
   if (!landmarks) return landmarks;
-  return landmarks.map(p => ({ ...p, x: 1 - p.x }));
+  return landmarks.map(p => ({ ...p, x: 1 - p.x, z: -(p.z || 0) }));
 }
 
 // ---------- MediaPipe Holistic ----------
