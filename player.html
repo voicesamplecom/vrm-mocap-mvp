@@ -269,16 +269,37 @@ document.getElementById('vrmInput').addEventListener('change', (e) => {
 let frames = [];
 let audioEl = null;
 
+let motionBaseQ = null;      // v2形式: { boneName: THREE.Quaternion }
+let motionBaseHipsPos = null; // v2形式: THREE.Vector3
+
 document.getElementById('motionInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      frames = JSON.parse(reader.result);
-      if (!Array.isArray(frames)) throw new Error('配列形式ではありません');
+      const parsed = JSON.parse(reader.result);
+      motionBaseQ = null;
+      motionBaseHipsPos = null;
+      if (Array.isArray(parsed)) {
+        frames = parsed; // 従来形式
+      } else if (parsed && parsed.format === 'vrm-motion-v2' && Array.isArray(parsed.frames)) {
+        frames = parsed.frames;
+        if (parsed.basePoseQ) {
+          motionBaseQ = {};
+          for (const boneName in parsed.basePoseQ) {
+            const q = parsed.basePoseQ[boneName];
+            motionBaseQ[boneName] = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+          }
+        }
+        if (parsed.baseHipsPos) {
+          motionBaseHipsPos = new THREE.Vector3(parsed.baseHipsPos.x, parsed.baseHipsPos.y, parsed.baseHipsPos.z);
+        }
+      } else {
+        throw new Error('未知の形式です');
+      }
       frameInfoEl.textContent = `frames: ${frames.length}`;
-      log(`モーション読み込み完了: ${frames.length}フレーム (${(file.size / 1024).toFixed(0)} KB)`);
+      log(`モーション読み込み完了: ${frames.length}フレーム (${(file.size / 1024).toFixed(0)} KB)${motionBaseQ ? ' [ベースポーズ込み]' : ''}`);
       document.getElementById('btnSmooth').disabled = frames.length < 5;
       updatePlayable();
     } catch (err) {
@@ -505,6 +526,60 @@ function applyHandRig(riggedHand, side) {
   }
 }
 
+// ---------- v2形式: ベースポーズ(クォータニオン) + 揺らぎ差分の合成適用 ----------
+function applyPosedFrame(f) {
+  if (!currentVRM || !motionBaseQ) return;
+  const tmpQ = new THREE.Quaternion();
+  const tmpE = new THREE.Euler();
+
+  for (const boneName in motionBaseQ) {
+    const Bone = THREE_VRM.VRMSchema.HumanoidBoneName[boneName];
+    if (Bone === undefined) continue;
+    const node = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(Bone);
+    if (!node) continue;
+
+    // ベースのクォータニオンをそのままコピー(オイラー分解を経由しないので破綻しない)
+    node.quaternion.copy(motionBaseQ[boneName]);
+
+    // 揺らぎ差分があれば重ね掛け
+    let d = null;
+    if (boneName === 'Head' && f.face && f.face.head) d = f.face.head;
+    else if (f.pose) {
+      if (boneName === 'Hips' && f.pose.Hips) d = f.pose.Hips.rotation;
+      else d = f.pose[boneName];
+    }
+    if (d) {
+      tmpE.set(d.x || 0, d.y || 0, d.z || 0, 'XYZ');
+      tmpQ.setFromEuler(tmpE);
+      node.quaternion.multiply(tmpQ);
+    }
+  }
+
+  if (motionBaseHipsPos) {
+    const hipsNode = currentVRM.humanoid && currentVRM.humanoid.getBoneNode(THREE_VRM.VRMSchema.HumanoidBoneName.Hips);
+    if (hipsNode) hipsNode.position.copy(motionBaseHipsPos);
+  }
+
+  // 表情(まばたき・口)は従来通りブレンドシェイプで
+  if (f.face) {
+    let blinkL = Math.max(0, Math.min(1, 1 - f.face.eye.l));
+    let blinkR = Math.max(0, Math.min(1, 1 - f.face.eye.r));
+    if (Math.abs(blinkL - blinkR) < 0.3) {
+      const avg = (blinkL + blinkR) / 2;
+      blinkL = avg; blinkR = avg;
+    }
+    setBlendShape('BlinkL', blinkL < 0.15 ? 0 : blinkL, 1);
+    setBlendShape('BlinkR', blinkR < 0.15 ? 0 : blinkR, 1);
+    if (f.face.mouth && f.face.mouth.shape) {
+      setBlendShape('A', f.face.mouth.shape.A);
+      setBlendShape('I', f.face.mouth.shape.I);
+      setBlendShape('U', f.face.mouth.shape.U);
+      setBlendShape('E', f.face.mouth.shape.E);
+      setBlendShape('O', f.face.mouth.shape.O);
+    }
+  }
+}
+
 // ---------- Playback ----------
 let playbackActive = false;
 
@@ -528,10 +603,14 @@ document.getElementById('btnPlay').addEventListener('click', () => {
     const elapsed = performance.now() - playStart;
     while (idx < frames.length && frames[idx].t <= elapsed) {
       const f = frames[idx];
-      if (f.face) applyFaceRig(f.face);
-      if (f.pose) applyPoseRig(f.pose);
-      if (f.lh) applyHandRig(f.lh, 'Left');
-      if (f.rh) applyHandRig(f.rh, 'Right');
+      if (motionBaseQ) {
+        applyPosedFrame(f); // v2: ベースポーズ(クォータニオン) + 揺らぎ差分
+      } else {
+        if (f.face) applyFaceRig(f.face);
+        if (f.pose) applyPoseRig(f.pose);
+        if (f.lh) applyHandRig(f.lh, 'Left');
+        if (f.rh) applyHandRig(f.rh, 'Right');
+      }
       idx++;
     }
     if (idx < frames.length) {
