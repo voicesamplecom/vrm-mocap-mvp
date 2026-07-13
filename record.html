@@ -255,7 +255,8 @@ document.getElementById('poseInput').addEventListener('change', (e) => {
       for (const boneName in bd) {
         const q = bd[boneName];
         if (q && typeof q.w === 'number') {
-          basePose[boneName] = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+          // vroidposeはUnity(左手系)由来のため、右手系への変換(ReverseZ: x,y符号反転)を挟む
+          basePose[boneName] = new THREE.Quaternion(-q.x, -q.y, q.z, q.w);
         }
       }
       if (bd.HipsPosition) {
