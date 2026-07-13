@@ -108,8 +108,9 @@ for (const id of ['Duration','Breath','Sway','Blink','Head']) {
 const FPS = 30;
 
 // ---------- ベースポーズ (.vroidpose) ----------
-// クォータニオンをオイラー角(KalidoKit互換のプレーンオブジェクト)に変換して保持
-let basePoseEuler = null;
+// クォータニオンを分解せず生のまま保持(オイラー分解は膝・肘で別解を掴む事故があるため)
+let basePoseQ = null;      // { boneName: {x,y,z,w} }
+let baseHipsPos = null;    // {x,y,z}
 
 document.getElementById('poseInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -120,14 +121,14 @@ document.getElementById('poseInput').addEventListener('change', (e) => {
       const data = JSON.parse(reader.result);
       const bd = data.BoneDefinition;
       if (!bd) throw new Error('BoneDefinitionが見つかりません');
-      basePoseEuler = {};
+      basePoseQ = {};
+      baseHipsPos = null;
       for (const boneName in bd) {
         const q = bd[boneName];
-        if (q && typeof q.w === 'number') {
-          const euler = new THREE.Euler().setFromQuaternion(
-            new THREE.Quaternion(q.x, q.y, q.z, q.w), 'XYZ'
-          );
-          basePoseEuler[boneName] = { x: euler.x, y: euler.y, z: euler.z };
+        if (boneName === 'HipsPosition') {
+          baseHipsPos = { x: q.x, y: q.y, z: q.z };
+        } else if (q && typeof q.w === 'number') {
+          basePoseQ[boneName] = { x: q.x, y: q.y, z: q.z, w: q.w };
         }
       }
       document.getElementById('poseStatus').textContent = `読み込み済み: ${file.name}`;
@@ -139,15 +140,6 @@ document.getElementById('poseInput').addEventListener('change', (e) => {
   };
   reader.readAsText(file);
 });
-
-// ベースポーズのオイラー角を取得(なければデフォルト値)
-function base(boneName, fallback) {
-  if (basePoseEuler && basePoseEuler[boneName]) return basePoseEuler[boneName];
-  return fallback;
-}
-function addRot(baseRot, dx, dy, dz) {
-  return { x: baseRot.x + dx, y: baseRot.y + dy, z: baseRot.z + dz };
-}
 
 // なめらかな乱数(パーリンノイズ風の簡易版): 複数のサイン波を無理数倍の周波数で重ねる
 function smoothNoise(t, seed) {
@@ -206,48 +198,68 @@ function generateMotion() {
     // Kalidokit形式では eye.l/r は「開き具合」(1=開いている)
     const eyeOpen = 1 - blink;
 
-    // デフォルト(棒立ち)の基準値。ベースポーズ読み込み時はそちらが優先される
-    const armDownR = { x: 0, y: 0, z: -1.15 };
-    const armDownL = { x: 0, y: 0, z: 1.15 };
-    const zero = { x: 0, y: 0, z: 0 };
-
-    frames.push({
-      t: Math.round(t * 1000),
-      face: {
-        head: addRot(base('Head', zero), headX, headY, headZ),
-        eye: { l: eyeOpen, r: eyeOpen },
-        mouth: { shape: { A: 0, I: 0, U: 0, E: 0, O: 0 } }
-      },
-      pose: {
-        Hips: {
-          rotation: addRot(base('Hips', zero), swayX, swayY, swayZ),
-          position: { x: 0, y: 0, z: 0 }
+    if (basePoseQ) {
+      // ポーズあり: 揺らぎの「差分」だけを記録(ベースはbasePoseQとして別枠で持つ)
+      frames.push({
+        t: Math.round(t * 1000),
+        face: {
+          head: { x: headX, y: headY, z: headZ },
+          eye: { l: eyeOpen, r: eyeOpen },
+          mouth: { shape: { A: 0, I: 0, U: 0, E: 0, O: 0 } }
         },
-        Spine: addRot(base('Spine', zero), breath * 0.02 + swayX * 0.5, swayY * 0.6, swayZ * 0.6),
-        RightUpperArm: addRot(base('RightUpperArm', armDownR), 0, 0, breath * 0.01),
-        RightLowerArm: base('RightLowerArm', { x: 0, y: 0, z: -0.1 }),
-        LeftUpperArm: addRot(base('LeftUpperArm', armDownL), 0, 0, -breath * 0.01),
-        LeftLowerArm: base('LeftLowerArm', { x: 0, y: 0, z: 0.1 }),
-        RightUpperLeg: base('RightUpperLeg', zero),
-        RightLowerLeg: base('RightLowerLeg', zero),
-        LeftUpperLeg: base('LeftUpperLeg', zero),
-        LeftLowerLeg: base('LeftLowerLeg', zero)
-      },
-      lh: null,
-      rh: null
-    });
+        pose: {
+          Hips: { rotation: { x: swayX, y: swayY, z: swayZ }, position: { x: 0, y: 0, z: 0 } },
+          Spine: { x: breath * 0.02 + swayX * 0.5, y: swayY * 0.6, z: swayZ * 0.6 },
+          RightUpperArm: { x: 0, y: 0, z: breath * 0.01 },
+          LeftUpperArm: { x: 0, y: 0, z: -breath * 0.01 }
+        },
+        lh: null,
+        rh: null
+      });
+    } else {
+      // ポーズなし: 従来通りの絶対値(棒立ちベース)
+      frames.push({
+        t: Math.round(t * 1000),
+        face: {
+          head: { x: headX, y: headY, z: headZ },
+          eye: { l: eyeOpen, r: eyeOpen },
+          mouth: { shape: { A: 0, I: 0, U: 0, E: 0, O: 0 } }
+        },
+        pose: {
+          Hips: {
+            rotation: { x: swayX, y: swayY, z: swayZ },
+            position: { x: 0, y: 0, z: 0 }
+          },
+          Spine: { x: breath * 0.02 + swayX * 0.5, y: swayY * 0.6, z: swayZ * 0.6 },
+          RightUpperArm: { x: 0, y: 0, z: -1.15 + breath * 0.01 },
+          RightLowerArm: { x: 0, y: 0, z: -0.1 },
+          LeftUpperArm: { x: 0, y: 0, z: 1.15 - breath * 0.01 },
+          LeftLowerArm: { x: 0, y: 0, z: 0.1 },
+          RightUpperLeg: { x: 0, y: 0, z: 0 },
+          RightLowerLeg: { x: 0, y: 0, z: 0 },
+          LeftUpperLeg: { x: 0, y: 0, z: 0 },
+          LeftLowerLeg: { x: 0, y: 0, z: 0 }
+        },
+        lh: null,
+        rh: null
+      });
+    }
   }
   return frames;
 }
 
 document.getElementById('btnGenerate').addEventListener('click', () => {
   const frames = generateMotion();
-  const json = JSON.stringify(frames);
+  // ポーズあり: basePoseQ(クォータニオン)を別枠で持つv2形式 / なし: 従来の配列形式
+  const payload = basePoseQ
+    ? { format: 'vrm-motion-v2', basePoseQ, baseHipsPos, frames }
+    : frames;
+  const json = JSON.stringify(payload);
   const dataUrl = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(json);
   const a = document.createElement('a');
   a.href = dataUrl;
   a.download = `generated-idle-${Date.now()}.json`;
-  a.textContent = `⬇ 生成モーション (タップして保存: ${(json.length / 1024).toFixed(0)}KB / ${frames.length}フレーム)`;
+  a.textContent = `⬇ 生成モーション (タップして保存: ${(json.length / 1024).toFixed(0)}KB / ${frames.length}フレーム${basePoseQ ? ' / ポーズ込み' : ''})`;
   const links = document.getElementById('downloadLinks');
   links.innerHTML = '';
   links.appendChild(a);
